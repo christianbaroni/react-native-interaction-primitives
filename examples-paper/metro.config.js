@@ -6,11 +6,13 @@ const packageRoot = path.resolve(__dirname, '..');
 
 const config = {
   resolver: {
+    disableHierarchicalLookup: true,
     extraNodeModules: {
       react: path.resolve(appNodeModules, 'react'),
       'react-native': path.resolve(appNodeModules, 'react-native'),
       'react-native-pager-drawer': packageRoot,
     },
+    nodeModulesPaths: [appNodeModules],
     unstable_enableSymlinks: true,
   },
   watchFolders: [packageRoot],

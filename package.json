@@ -2,7 +2,7 @@
   "name": "react-native-pager-drawer",
   "version": "0.1.0",
   "packageManager": "yarn@4.13.0",
-  "description": "Native, interruptible pager component for React Native",
+  "description": "Native, interruptible pager and underlay side drawer components for React Native",
   "main": "lib/commonjs/index",
   "module": "lib/module/index",
   "types": "lib/typescript/index.d.ts",
@@ -66,6 +66,7 @@
     "ios",
     "android",
     "pager",
+    "drawer",
     "gesture",
     "animation"
   ],
@@ -131,7 +132,10 @@
     "ios": {
       "componentProvider": {
         "RNPagerPageView": "RNPagerPageViewComponentView",
-        "RNPagerView": "RNPagerViewComponentView"
+        "RNPagerView": "RNPagerViewComponentView",
+        "RNSideDrawerContentView": "RNSideDrawerContentViewComponentView",
+        "RNSideDrawerPanelView": "RNSideDrawerPanelViewComponentView",
+        "RNSideDrawerView": "RNSideDrawerViewComponentView"
       }
     },
     "android": {

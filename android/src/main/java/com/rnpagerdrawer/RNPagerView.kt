@@ -493,7 +493,7 @@ internal class RNPagerView(private val reactContext: ThemedReactContext) : ViewG
         val tag = id
         if (tag == View.NO_ID) return
         UIManagerHelper.getEventDispatcherForReactTag(reactContext, tag)
-            ?.dispatchEvent(RNPagerEvent(UIManagerHelper.getSurfaceId(this), tag, eventName, payload, coalesces))
+            ?.dispatchEvent(RNDirectEvent(UIManagerHelper.getSurfaceId(this), tag, eventName, payload, coalesces))
     }
 
     private fun transitionToPhase(next: Phase) {

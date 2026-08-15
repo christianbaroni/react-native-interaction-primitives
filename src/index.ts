@@ -1,4 +1,5 @@
 import { Pager } from './Pager';
+import { SideDrawer } from './SideDrawer';
 
 export type {
   PagerPageChange,
@@ -10,6 +11,12 @@ export type {
   PagerScrollPhase,
   PagerSetPageOptions,
   PagerState,
+  SideDrawerCommandOptions,
+  SideDrawerPhase,
+  SideDrawerProgressEvent,
+  SideDrawerProgressNativeEvent,
+  SideDrawerProps,
+  SideDrawerRef,
 } from './types';
 
-export { Pager };
+export { Pager, SideDrawer };

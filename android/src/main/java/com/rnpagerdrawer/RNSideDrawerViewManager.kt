@@ -1,0 +1,105 @@
+package com.rnpagerdrawer
+
+import android.view.View
+import com.facebook.react.module.annotations.ReactModule
+import com.facebook.react.uimanager.PixelUtil
+import com.facebook.react.uimanager.ThemedReactContext
+import com.facebook.react.uimanager.ViewGroupManager
+import com.facebook.react.uimanager.ViewManagerDelegate
+import com.facebook.react.uimanager.annotations.ReactProp
+import com.facebook.react.viewmanagers.RNSideDrawerViewManagerDelegate
+import com.facebook.react.viewmanagers.RNSideDrawerViewManagerInterface
+
+@ReactModule(name = RNSideDrawerViewManager.REACT_CLASS)
+internal class RNSideDrawerViewManager :
+    ViewGroupManager<RNSideDrawerView>(),
+    RNSideDrawerViewManagerInterface<RNSideDrawerView> {
+    private val delegate: ViewManagerDelegate<RNSideDrawerView> =
+        RNSideDrawerViewManagerDelegate<RNSideDrawerView, RNSideDrawerViewManager>(this)
+
+    override fun getName(): String = REACT_CLASS
+
+    override fun createViewInstance(reactContext: ThemedReactContext): RNSideDrawerView = RNSideDrawerView(reactContext)
+
+    override fun getDelegate(): ViewManagerDelegate<RNSideDrawerView> = delegate
+
+    override fun needsCustomLayoutForChildren(): Boolean = true
+
+    override fun addView(parent: RNSideDrawerView, child: View, index: Int) {
+        parent.addDrawerSlot(child, index)
+    }
+
+    override fun getChildCount(parent: RNSideDrawerView): Int = parent.drawerSlotCount()
+
+    override fun getChildAt(parent: RNSideDrawerView, index: Int): View {
+        return parent.getDrawerSlotAt(index)
+            ?: throw IndexOutOfBoundsException("RNSideDrawerView has no slot at index $index.")
+    }
+
+    override fun removeViewAt(parent: RNSideDrawerView, index: Int) {
+        parent.removeDrawerSlotAt(index)
+    }
+
+    override fun onDropViewInstance(view: RNSideDrawerView) {
+        view.prepareForRemoval()
+        super.onDropViewInstance(view)
+    }
+
+    override fun getExportedCustomDirectEventTypeConstants(): MutableMap<String, Any> {
+        val constants = super.getExportedCustomDirectEventTypeConstants() ?: HashMap()
+        constants["topOpenChange"] = mutableMapOf("registrationName" to "onOpenChange")
+        constants["topProgress"] = mutableMapOf("registrationName" to "onProgress")
+        return constants
+    }
+
+    @ReactProp(name = "drawerWidth")
+    override fun setDrawerWidth(view: RNSideDrawerView, value: Float) {
+        view.drawerWidthPx = PixelUtil.toPixelFromDIP(value)
+    }
+
+    @ReactProp(name = "edgeWidth", defaultFloat = 24f)
+    override fun setEdgeWidth(view: RNSideDrawerView, value: Float) {
+        view.edgeWidthPx = PixelUtil.toPixelFromDIP(value)
+    }
+
+    @ReactProp(name = "gestureEnabled", defaultBoolean = true)
+    override fun setGestureEnabled(view: RNSideDrawerView, value: Boolean) {
+        view.gestureEnabled = value
+    }
+
+    @ReactProp(name = "initialOpen", defaultBoolean = false)
+    override fun setInitialOpen(view: RNSideDrawerView, value: Boolean) {
+        view.initialOpen = value
+    }
+
+    @ReactProp(name = "openChangeEventsEnabled", defaultBoolean = false)
+    override fun setOpenChangeEventsEnabled(view: RNSideDrawerView, value: Boolean) {
+        view.openChangeEventsEnabled = value
+    }
+
+    @ReactProp(name = "progressEventsEnabled", defaultBoolean = false)
+    override fun setProgressEventsEnabled(view: RNSideDrawerView, value: Boolean) {
+        view.progressEventsEnabled = value
+    }
+
+    @ReactProp(name = "side")
+    override fun setSide(view: RNSideDrawerView, value: String?) {
+        view.side = if (value == "end") RNSideDrawerView.Side.End else RNSideDrawerView.Side.Start
+    }
+
+    override fun close(view: RNSideDrawerView, animated: Boolean) {
+        view.close(animated)
+    }
+
+    override fun open(view: RNSideDrawerView, animated: Boolean) {
+        view.open(animated)
+    }
+
+    override fun toggle(view: RNSideDrawerView, animated: Boolean) {
+        view.toggle(animated)
+    }
+
+    companion object {
+        const val REACT_CLASS = "RNSideDrawerView"
+    }
+}

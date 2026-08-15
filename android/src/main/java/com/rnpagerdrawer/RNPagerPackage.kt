@@ -13,6 +13,9 @@ class RNPagerPackage : BaseReactPackage() {
         return listOf(
             ModuleSpec.viewManagerSpec { RNPagerPageViewManager() },
             ModuleSpec.viewManagerSpec { RNPagerViewManager() },
+            ModuleSpec.viewManagerSpec { RNSideDrawerPanelViewManager() },
+            ModuleSpec.viewManagerSpec { RNSideDrawerContentViewManager() },
+            ModuleSpec.viewManagerSpec { RNSideDrawerViewManager() },
         )
     }
 

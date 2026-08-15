@@ -57,3 +57,38 @@ export type PagerSetPageOptions = Readonly<{
 export type PagerRef = React.Component<PagerProps> & {
   setPage(page: number, options?: PagerSetPageOptions): void;
 };
+
+export type SideDrawerPhase = 'closed' | 'open' | 'dragging' | 'settling';
+
+export type SideDrawerProgressEvent = Readonly<{
+  phase: SideDrawerPhase;
+  progress: number;
+  settlingSource: 'none' | 'programmatic' | 'release';
+  targetOpen: boolean;
+}>;
+
+export type SideDrawerProgressNativeEvent = Readonly<{
+  nativeEvent: SideDrawerProgressEvent;
+}>;
+
+export type SideDrawerProps = ViewProps & {
+  children: React.ReactElement;
+  drawer: React.ReactElement;
+  drawerWidth: number;
+  edgeWidth?: number;
+  gestureEnabled?: boolean;
+  initialOpen?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  onProgress?: (event: SideDrawerProgressNativeEvent) => void;
+  side?: 'start' | 'end';
+};
+
+export type SideDrawerCommandOptions = Readonly<{
+  animated?: boolean;
+}>;
+
+export type SideDrawerRef = React.Component<SideDrawerProps> & {
+  close(options?: SideDrawerCommandOptions): void;
+  open(options?: SideDrawerCommandOptions): void;
+  toggle(options?: SideDrawerCommandOptions): void;
+};

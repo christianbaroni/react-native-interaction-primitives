@@ -1,6 +1,6 @@
 # react-native-pager-drawer
 
-Native, interruptible paging for React Native. Gestures, release projection, and settle animations remain on the platform UI thread; JavaScript and Reanimated can observe motion without driving it.
+Native, interruptible paging and underlay drawers for React Native. Gestures, release projection, and settle animations remain on the platform UI thread; JavaScript and Reanimated can observe motion without driving it.
 
 The package supports React Native 0.81 and later. React Native 0.81 apps may use either Paper or Fabric. React Native 0.82 and later use Fabric.
 
@@ -71,6 +71,53 @@ The target must be an integer within the currently mounted page range. Invalid t
 - `settling`, with the anchor, target, and `release` or `programmatic` source
 
 `onPageScroll` receives the flat native transport, including `offset`, `position`, `page`, `pageCount`, `pageExtent`, `phase`, and the current anchor and target.
+
+## Side drawer
+
+`SideDrawer` keeps its drawer slot fixed underneath one moving application surface. A closed gesture begins only inside `edgeWidth`; once revealed, horizontal gestures and taps belong to the moving content while the exposed drawer remains interactive.
+
+```tsx
+import * as React from 'react';
+import { Text, View } from 'react-native';
+import { SideDrawer, type SideDrawerRef } from 'react-native-pager-drawer';
+
+export function Shell() {
+  const drawer = React.useRef<SideDrawerRef>(null);
+
+  return (
+    <SideDrawer
+      drawer={
+        <View>
+          <Text>Navigation</Text>
+        </View>
+      }
+      drawerWidth={300}
+      ref={drawer}
+      style={{ flex: 1 }}
+    >
+      <View style={{ flex: 1 }}>
+        <Text onPress={() => drawer.current?.open()}>Open</Text>
+      </View>
+    </SideDrawer>
+  );
+}
+```
+
+The ref exposes `open`, `close`, and `toggle`; each accepts `{ animated?: boolean }`. Every animated command and release can be interrupted by the next eligible gesture.
+
+### Props
+
+- `drawer: ReactElement` — the fixed underlay content.
+- `children: ReactElement` — the application surface that moves over the drawer.
+- `drawerWidth: number` — required reveal distance and drawer layout width.
+- `edgeWidth?: number` — closed-state gesture region; defaults to `24`.
+- `gestureEnabled?: boolean` — enables native drag gestures; commands and tap-to-close remain available.
+- `initialOpen?: boolean` — selects the initial native endpoint without creating a controlled state loop.
+- `side?: 'start' | 'end'` — logical drawer side, resolved through native layout direction.
+- `onOpenChange?: (open) => void` — reports a completed endpoint change.
+- `onProgress?: (event) => void` — reports normalized progress and native phase. Both platforms skip payload construction when this observer is absent.
+
+`onProgress` reports `progress` in `[0, 1]`, `phase`, `targetOpen`, and the `release`, `programmatic`, or `none` settling source. It is observational; writing the event back into layout is not part of the component contract.
 
 ## Reanimated observation
 
