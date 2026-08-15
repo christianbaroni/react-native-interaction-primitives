@@ -1,0 +1,14 @@
+{
+  "extends": "@react-native/typescript-config",
+  "compilerOptions": {
+    "esModuleInterop": true,
+    "paths": {
+      "react-native-pager-drawer": ["../src/index"],
+      "react-native-pager-drawer/reanimated": ["../src/reanimated"],
+      "react-native-reanimated": ["./node_modules/react-native-reanimated"]
+    },
+    "types": ["jest"]
+  },
+  "include": ["**/*.ts", "**/*.tsx"],
+  "exclude": ["**/node_modules", "**/Pods"]
+}

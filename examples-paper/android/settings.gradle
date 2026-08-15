@@ -1,0 +1,11 @@
+pluginManagement { includeBuild("../node_modules/@react-native/gradle-plugin") }
+plugins { id("com.facebook.react.settings") }
+def appRoot = file("..")
+def nodeBinary = System.getenv("NODE_BINARY") ?: "/Users/christian/.nvm/versions/node/v22.21.1/bin/node"
+def reactNativeCli = new File(appRoot, "node_modules/@react-native-community/cli/build/bin.js").absolutePath
+extensions.configure(com.facebook.react.ReactSettingsExtension) { ex ->
+  ex.autolinkLibrariesFromCommand([nodeBinary, reactNativeCli, "config"], appRoot)
+}
+rootProject.name = 'PagerDrawerPaperExample'
+include ':app'
+includeBuild('../node_modules/@react-native/gradle-plugin')

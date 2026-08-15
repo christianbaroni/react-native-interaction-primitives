@@ -1,0 +1,583 @@
+package com.rnpagerdrawer
+
+import android.view.MotionEvent
+import android.view.VelocityTracker
+import android.view.View
+import android.view.ViewConfiguration
+import android.view.ViewGroup
+import android.widget.OverScroller
+import com.facebook.react.bridge.Arguments
+import com.facebook.react.bridge.WritableMap
+import com.facebook.react.uimanager.PixelUtil
+import com.facebook.react.uimanager.ThemedReactContext
+import com.facebook.react.uimanager.UIManagerHelper
+import kotlin.math.abs
+import kotlin.math.max
+import kotlin.math.min
+import kotlin.math.roundToInt
+
+internal class RNPagerView(private val reactContext: ThemedReactContext) : ViewGroup(reactContext) {
+    enum class Orientation {
+        Horizontal,
+        Vertical,
+    }
+
+    private enum class Phase {
+        Empty,
+        Idle,
+        Dragging,
+        Settling,
+    }
+
+    private enum class SettlingSource {
+        None,
+        Programmatic,
+        Release,
+    }
+
+    private val pages = ArrayList<RNPagerPageView>()
+    private val scroller = OverScroller(reactContext)
+    private val targetResolverScroller = OverScroller(reactContext)
+    private val touchSlop = ViewConfiguration.get(reactContext).scaledTouchSlop
+    private val maximumFlingVelocity = ViewConfiguration.get(reactContext).scaledMaximumFlingVelocity
+
+    private var activePointerId = INVALID_POINTER_ID
+    private var anchorOffsetPx = 0f
+    private var anchorPage = 0
+    private var downCrossAxisPx = 0f
+    private var downMainAxisPx = 0f
+    private var hasLaidOutPages = false
+    private var interruptedSettleVelocityPxPerSecond = 0f
+    private var isDragging = false
+    private var lastEmittedPage = Int.MIN_VALUE
+    private var lastMainAxisPx = 0f
+    private var lastPageExtentPx = 0f
+    private var phase = Phase.Empty
+    private var selectedPage = 0
+    private var settlingSource = SettlingSource.None
+    private var targetPage = -1
+    private var velocityTracker: VelocityTracker? = null
+
+    var initialPage: Int = 0
+        set(value) {
+            field = max(0, value)
+            if (!hasLaidOutPages) selectedPage = clampPage(field)
+        }
+
+    var orientation: Orientation = Orientation.Horizontal
+        set(value) {
+            if (field == value) return
+            field = value
+            requestLayout()
+        }
+
+    var pageInsetPx: Float = 0f
+        set(value) {
+            field = max(0f, value)
+            requestLayout()
+        }
+
+    var pageChangeEventsEnabled: Boolean = false
+
+    var pageScrollEventsEnabled: Boolean = false
+
+    var pageSpacingPx: Float = 0f
+        set(value) {
+            field = max(0f, value)
+            requestLayout()
+        }
+
+    var pagerScrollEnabled: Boolean = true
+        set(value) {
+            if (field == value) return
+            field = value
+            if (!value) {
+                if (isDragging) {
+                    val page = clampPage((currentOffsetPx() / max(pageExtentPx(), 1f)).roundToInt())
+                    settleToPage(page, SettlingSource.Release, true)
+                }
+                finishTouch()
+            }
+        }
+
+    var stateEventsEnabled: Boolean = false
+
+    init {
+        clipChildren = false
+        clipToPadding = false
+    }
+
+    override fun onDetachedFromWindow() {
+        if (phase == Phase.Settling) synchronizeScrollerFrame()
+        scroller.abortAnimation()
+        when (phase) {
+            Phase.Dragging -> finishSettlingAtPage(
+                clampPage((currentOffsetPx() / max(pageExtentPx(), 1f)).roundToInt()),
+            )
+            Phase.Settling -> finishSettlingAtPage(targetPage)
+            Phase.Empty, Phase.Idle -> Unit
+        }
+        finishTouch()
+        super.onDetachedFromWindow()
+    }
+
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        val measuredWidth = MeasureSpec.getSize(widthMeasureSpec)
+        val measuredHeight = MeasureSpec.getSize(heightMeasureSpec)
+        setMeasuredDimension(measuredWidth, measuredHeight)
+
+        val childWidth = if (orientation == Orientation.Horizontal) {
+            max(0f, measuredWidth - pageInsetPx * 2f)
+        } else {
+            measuredWidth.toFloat()
+        }.roundToInt()
+        val childHeight = if (orientation == Orientation.Horizontal) {
+            measuredHeight.toFloat()
+        } else {
+            max(0f, measuredHeight - pageInsetPx * 2f)
+        }.roundToInt()
+        val childWidthSpec = MeasureSpec.makeMeasureSpec(childWidth, MeasureSpec.EXACTLY)
+        val childHeightSpec = MeasureSpec.makeMeasureSpec(childHeight, MeasureSpec.EXACTLY)
+        pages.forEach { it.measure(childWidthSpec, childHeightSpec) }
+    }
+
+    override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
+        val oldExtent = lastPageExtentPx
+        val oldPosition = if (oldExtent > 0f) currentOffsetPx() / oldExtent else selectedPage.toFloat()
+        val extent = pageExtentPx()
+        lastPageExtentPx = extent
+
+        pages.forEachIndexed { index, page ->
+            val pageLeft: Int
+            val pageTop: Int
+            if (orientation == Orientation.Horizontal) {
+                pageLeft = (pageInsetPx + index * extent).roundToInt()
+                pageTop = 0
+            } else {
+                pageLeft = 0
+                pageTop = (pageInsetPx + index * extent).roundToInt()
+            }
+            page.layout(pageLeft, pageTop, pageLeft + page.measuredWidth, pageTop + page.measuredHeight)
+        }
+
+        val nextPosition = if (oldExtent > 0f && phase != Phase.Empty) oldPosition else selectedPage.toFloat()
+        scrollToOffsetPx(nextPosition * extent)
+        hasLaidOutPages = pages.isNotEmpty()
+        if (pages.isEmpty()) {
+            transitionToPhase(Phase.Empty)
+        } else if (phase == Phase.Empty) {
+            transitionToPhase(Phase.Idle)
+        }
+        publishState()
+    }
+
+    override fun onInterceptTouchEvent(event: MotionEvent): Boolean {
+        if (!pagerScrollEnabled || pages.size <= 1) return false
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                initializeTouch(event)
+                if (!scroller.isFinished) {
+                    synchronizeScrollerFrame()
+                    beginDraggingFromCurrentOffset()
+                    scroller.abortAnimation()
+                    parent?.requestDisallowInterceptTouchEvent(true)
+                    return true
+                }
+            }
+            MotionEvent.ACTION_MOVE -> {
+                val pointerIndex = event.findPointerIndex(activePointerId)
+                if (pointerIndex < 0) return false
+                val main = mainAxis(event, pointerIndex)
+                val cross = crossAxis(event, pointerIndex)
+                val mainDelta = main - downMainAxisPx
+                val crossDelta = cross - downCrossAxisPx
+                if (abs(mainDelta) > touchSlop && abs(mainDelta) > abs(crossDelta)) {
+                    beginDraggingFromCurrentOffset()
+                    lastMainAxisPx = main
+                    parent?.requestDisallowInterceptTouchEvent(true)
+                    return true
+                }
+            }
+            MotionEvent.ACTION_CANCEL, MotionEvent.ACTION_UP -> finishTouch()
+        }
+        return false
+    }
+
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (!pagerScrollEnabled || pages.isEmpty()) return false
+        if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+            if (isDragging) return true
+            initializeTouch(event)
+            if (!scroller.isFinished) {
+                synchronizeScrollerFrame()
+                beginDraggingFromCurrentOffset()
+                scroller.abortAnimation()
+                parent?.requestDisallowInterceptTouchEvent(true)
+            }
+            return true
+        }
+        ensureVelocityTracker().addMovement(event)
+        when (event.actionMasked) {
+            MotionEvent.ACTION_POINTER_UP -> handlePointerUp(event)
+            MotionEvent.ACTION_MOVE -> {
+                val pointerIndex = event.findPointerIndex(activePointerId)
+                if (pointerIndex < 0) return false
+                val main = mainAxis(event, pointerIndex)
+                if (!isDragging) {
+                    val mainDelta = main - downMainAxisPx
+                    val crossDelta = crossAxis(event, pointerIndex) - downCrossAxisPx
+                    if (abs(mainDelta) > touchSlop && abs(mainDelta) > abs(crossDelta)) {
+                        beginDraggingFromCurrentOffset()
+                        parent?.requestDisallowInterceptTouchEvent(true)
+                    }
+                }
+                if (isDragging) {
+                    scrollToOffsetPx(currentOffsetPx() + lastMainAxisPx - main)
+                    lastMainAxisPx = main
+                    publishPageScroll()
+                }
+                return true
+            }
+            MotionEvent.ACTION_UP -> {
+                if (isDragging) {
+                    val tracker = ensureVelocityTracker()
+                    tracker.computeCurrentVelocity(1000, maximumFlingVelocity.toFloat())
+                    val velocity = if (orientation == Orientation.Horizontal) {
+                        -tracker.getXVelocity(activePointerId)
+                    } else {
+                        -tracker.getYVelocity(activePointerId)
+                    }
+                    settleFromRelease(velocity)
+                }
+                finishTouch()
+                return true
+            }
+            MotionEvent.ACTION_CANCEL -> {
+                if (isDragging) {
+                    settleToPage(
+                        clampPage((currentOffsetPx() / max(pageExtentPx(), 1f)).roundToInt()),
+                        SettlingSource.Release,
+                        true,
+                    )
+                }
+                finishTouch()
+                return true
+            }
+        }
+        return true
+    }
+
+    override fun computeScroll() {
+        if (phase != Phase.Settling) return
+        if (scroller.computeScrollOffset()) {
+            val offset = if (orientation == Orientation.Horizontal) scroller.currX else scroller.currY
+            scrollToOffsetPx(offset.toFloat())
+            publishPageScroll()
+            postInvalidateOnAnimation()
+            return
+        }
+        finishSettlingAtPage(targetPage)
+    }
+
+    fun addPagerPage(page: RNPagerPageView, index: Int) {
+        val boundedIndex = index.coerceIn(0, pages.size)
+        pages.add(boundedIndex, page)
+        super.addView(page, boundedIndex, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+        if (!hasLaidOutPages) selectedPage = clampPage(initialPage)
+        if (phase == Phase.Empty) transitionToPhase(Phase.Idle)
+        requestLayout()
+        publishState()
+    }
+
+    fun getPagerPageAt(index: Int): RNPagerPageView? = pages.getOrNull(index)
+
+    fun pagerPageCount(): Int = pages.size
+
+    fun removePagerPageAt(index: Int) {
+        val page = pages.removeAt(index)
+        super.removeView(page)
+        selectedPage = clampPage(selectedPage)
+        if (pages.isEmpty()) hasLaidOutPages = false
+        if (pages.isEmpty()) transitionToPhase(Phase.Empty)
+        requestLayout()
+        publishState()
+    }
+
+    fun setPage(page: Int, animated: Boolean) {
+        if (page !in pages.indices) return
+        if (phase == Phase.Settling) synchronizeScrollerFrame()
+        settleToPage(page, SettlingSource.Programmatic, animated)
+    }
+
+    fun prepareForRemoval() {
+        finishTouch()
+        scroller.abortAnimation()
+        pages.clear()
+        removeAllViews()
+        hasLaidOutPages = false
+        transitionToPhase(Phase.Empty)
+    }
+
+    private fun initializeTouch(event: MotionEvent) {
+        velocityTracker?.recycle()
+        velocityTracker = VelocityTracker.obtain().also { it.addMovement(event) }
+        activePointerId = event.getPointerId(0)
+        downMainAxisPx = mainAxis(event, 0)
+        downCrossAxisPx = crossAxis(event, 0)
+        lastMainAxisPx = downMainAxisPx
+        isDragging = false
+    }
+
+    private fun finishTouch() {
+        activePointerId = INVALID_POINTER_ID
+        isDragging = false
+        velocityTracker?.recycle()
+        velocityTracker = null
+    }
+
+    private fun handlePointerUp(event: MotionEvent) {
+        val actionIndex = event.actionIndex
+        if (event.getPointerId(actionIndex) != activePointerId) return
+        val nextIndex = if (actionIndex == 0) 1 else 0
+        activePointerId = event.getPointerId(nextIndex)
+        lastMainAxisPx = mainAxis(event, nextIndex)
+        velocityTracker?.clear()
+    }
+
+    private fun synchronizeScrollerFrame() {
+        if (!scroller.computeScrollOffset()) return
+        val offset = if (orientation == Orientation.Horizontal) scroller.currX else scroller.currY
+        scrollToOffsetPx(offset.toFloat())
+        publishPageScroll()
+    }
+
+    private fun beginDraggingFromCurrentOffset() {
+        if (isDragging) return
+        val interruptedTarget = if (phase == Phase.Settling) targetPage else null
+        val interruptedVelocity = if (phase == Phase.Settling && !scroller.isFinished) currentScrollerVelocityPxPerSecond() else 0f
+        isDragging = true
+        anchorOffsetPx = currentOffsetPx()
+        val extent = pageExtentPx()
+        anchorPage = interruptedTarget?.let(::clampPage)
+            ?: clampPage(if (extent > 0f) (anchorOffsetPx / extent).roundToInt() else selectedPage)
+        targetPage = anchorPage
+        interruptedSettleVelocityPxPerSecond = interruptedVelocity
+        settlingSource = SettlingSource.None
+        transitionToPhase(Phase.Dragging)
+        publishState()
+    }
+
+    private fun settleFromRelease(velocityPxPerSecond: Float) {
+        val resolvedVelocity = velocityPxPerSecond + interruptedSettleVelocityPxPerSecond
+        interruptedSettleVelocityPxPerSecond = 0f
+        val naturalOffset = naturalTargetOffset(currentOffsetPx(), resolvedVelocity)
+        val target = resolveTargetPage(anchorPage, naturalOffset, pages.size, pageExtentPx())
+        settleToPage(target, SettlingSource.Release, true, resolvedVelocity)
+    }
+
+    private fun settleToPage(
+        page: Int,
+        source: SettlingSource,
+        animated: Boolean,
+        releaseVelocityPxPerSecond: Float = 0f,
+    ) {
+        if (source == SettlingSource.Programmatic) {
+            anchorOffsetPx = currentOffsetPx()
+            anchorPage = currentSettledPage()
+        }
+        targetPage = clampPage(page)
+        settlingSource = source
+        transitionToPhase(Phase.Settling)
+        publishState()
+
+        val start = currentOffsetPx().roundToInt()
+        val end = offsetForPage(targetPage).roundToInt()
+        scroller.abortAnimation()
+        if (!animated || start == end) {
+            scrollToOffsetPx(end.toFloat())
+            publishPageScroll()
+            finishSettlingAtPage(targetPage)
+            return
+        }
+        if (source != SettlingSource.Release || !startReleaseFling(start, end, releaseVelocityPxPerSecond)) {
+            if (orientation == Orientation.Horizontal) {
+                scroller.startScroll(start, 0, end - start, 0)
+            } else {
+                scroller.startScroll(0, start, 0, end - start)
+            }
+        }
+        postInvalidateOnAnimation()
+    }
+
+    private fun finishSettlingAtPage(page: Int) {
+        if (phase != Phase.Settling && phase != Phase.Dragging) return
+        selectedPage = clampPage(page)
+        scrollToOffsetPx(offsetForPage(selectedPage))
+        transitionToPhase(if (pages.isEmpty()) Phase.Empty else Phase.Idle)
+        publishState()
+        if (lastEmittedPage != selectedPage) {
+            lastEmittedPage = selectedPage
+            if (!pageChangeEventsEnabled) return
+            val payload = Arguments.createMap()
+            payload.putInt("page", selectedPage)
+            dispatchEvent("topPageChange", payload, coalesces = false)
+        }
+    }
+
+    private fun currentScrollerVelocityPxPerSecond(): Float {
+        val remaining = offsetForPage(targetPage) - currentOffsetPx()
+        if (remaining == 0f) return 0f
+        return scroller.currVelocity * if (remaining > 0f) 1f else -1f
+    }
+
+    private fun startReleaseFling(start: Int, end: Int, velocityPxPerSecond: Float): Boolean {
+        val distance = end - start
+        if (distance == 0 || velocityPxPerSecond * distance <= 0f) return false
+        val minOffset = min(start, end)
+        val maxOffset = max(start, end)
+        if (orientation == Orientation.Horizontal) {
+            scroller.fling(start, 0, velocityPxPerSecond.roundToInt(), 0, minOffset, maxOffset, 0, 0)
+            if (scroller.finalX == end) return true
+        } else {
+            scroller.fling(0, start, 0, velocityPxPerSecond.roundToInt(), 0, 0, minOffset, maxOffset)
+            if (scroller.finalY == end) return true
+        }
+        scroller.abortAnimation()
+        return false
+    }
+
+    private fun naturalTargetOffset(currentOffset: Float, velocityPxPerSecond: Float): Float {
+        val maxOffset = maxScrollOffsetPx().roundToInt()
+        targetResolverScroller.forceFinished(true)
+        if (orientation == Orientation.Horizontal) {
+            targetResolverScroller.fling(
+                currentOffset.roundToInt(), 0, velocityPxPerSecond.roundToInt(), 0, 0, maxOffset, 0, 0,
+            )
+            return targetResolverScroller.finalX.toFloat()
+        }
+        targetResolverScroller.fling(
+            0, currentOffset.roundToInt(), 0, velocityPxPerSecond.roundToInt(), 0, 0, 0, maxOffset,
+        )
+        return targetResolverScroller.finalY.toFloat()
+    }
+
+    private fun statePayload(): WritableMap {
+        val extentPx = pageExtentPx()
+        val offsetPx = currentOffsetPx()
+        val position = if (extentPx > 0f) offsetPx / extentPx else 0f
+        val payload = Arguments.createMap()
+        payload.putDouble("anchorOffset", toDip(anchorOffsetPx))
+        payload.putInt("anchorPage", anchorPage)
+        payload.putDouble("offset", toDip(offsetPx))
+        payload.putInt("page", if (pages.isEmpty()) 0 else clampPage(position.roundToInt()))
+        payload.putInt("pageCount", pages.size)
+        payload.putDouble("pageExtent", toDip(extentPx))
+        payload.putString("phase", phaseName())
+        payload.putDouble("position", position.toDouble())
+        payload.putString("settlingSource", settlingSourceName())
+        payload.putInt("targetPage", if (phase == Phase.Settling) targetPage else -1)
+        return payload
+    }
+
+    private fun publishState() {
+        if (!stateEventsEnabled) return
+        dispatchEvent("topStateChange", statePayload(), coalesces = false)
+    }
+
+    private fun publishPageScroll() {
+        if (!pageScrollEventsEnabled) return
+        dispatchEvent("topPageScroll", statePayload(), coalesces = true)
+    }
+
+    private fun dispatchEvent(eventName: String, payload: WritableMap, coalesces: Boolean) {
+        val tag = id
+        if (tag == View.NO_ID) return
+        UIManagerHelper.getEventDispatcherForReactTag(reactContext, tag)
+            ?.dispatchEvent(RNPagerEvent(UIManagerHelper.getSurfaceId(this), tag, eventName, payload, coalesces))
+    }
+
+    private fun transitionToPhase(next: Phase) {
+        phase = if (pages.isEmpty()) Phase.Empty else next
+    }
+
+    private fun phaseName(): String = when (phase) {
+        Phase.Empty -> "empty"
+        Phase.Idle -> "idle"
+        Phase.Dragging -> "dragging"
+        Phase.Settling -> "settling"
+    }
+
+    private fun settlingSourceName(): String {
+        if (phase != Phase.Settling) return "none"
+        return when (settlingSource) {
+            SettlingSource.None -> "none"
+            SettlingSource.Programmatic -> "programmatic"
+            SettlingSource.Release -> "release"
+        }
+    }
+
+    private fun mainAxis(event: MotionEvent, pointerIndex: Int): Float {
+        return if (orientation == Orientation.Horizontal) event.getX(pointerIndex) else event.getY(pointerIndex)
+    }
+
+    private fun crossAxis(event: MotionEvent, pointerIndex: Int): Float {
+        return if (orientation == Orientation.Horizontal) event.getY(pointerIndex) else event.getX(pointerIndex)
+    }
+
+    private fun currentOffsetPx(): Float {
+        return if (orientation == Orientation.Horizontal) scrollX.toFloat() else scrollY.toFloat()
+    }
+
+    private fun scrollToOffsetPx(offset: Float) {
+        val bounded = offset.coerceIn(0f, maxScrollOffsetPx()).roundToInt()
+        if (orientation == Orientation.Horizontal) scrollTo(bounded, 0) else scrollTo(0, bounded)
+    }
+
+    private fun offsetForPage(page: Int): Float = clampPage(page) * pageExtentPx()
+
+    private fun maxScrollOffsetPx(): Float = max(0f, (pages.size - 1) * pageExtentPx())
+
+    private fun pageExtentPx(): Float {
+        return if (orientation == Orientation.Horizontal) pageWidthPx() + pageSpacingPx else pageHeightPx() + pageSpacingPx
+    }
+
+    private fun pageWidthPx(): Float {
+        return if (orientation == Orientation.Horizontal) max(0f, width - pageInsetPx * 2f) else width.toFloat()
+    }
+
+    private fun pageHeightPx(): Float {
+        return if (orientation == Orientation.Horizontal) height.toFloat() else max(0f, height - pageInsetPx * 2f)
+    }
+
+    private fun currentSettledPage(): Int {
+        val extent = pageExtentPx()
+        return clampPage(if (extent > 0f) (currentOffsetPx() / extent).roundToInt() else selectedPage)
+    }
+
+    private fun clampPage(page: Int): Int {
+        return if (pages.isEmpty()) 0 else page.coerceIn(0, pages.lastIndex)
+    }
+
+    private fun toDip(px: Float): Double = PixelUtil.toDIPFromPixel(px).toDouble()
+
+    private fun ensureVelocityTracker(): VelocityTracker {
+        return velocityTracker ?: VelocityTracker.obtain().also { velocityTracker = it }
+    }
+
+    private fun resolveTargetPage(
+        anchor: Int,
+        naturalTargetOffset: Float,
+        pageCount: Int,
+        pageExtent: Float,
+    ): Int {
+        if (pageCount <= 0) return 0
+        val boundedAnchor = anchor.coerceIn(0, pageCount - 1)
+        if (pageExtent <= 0f) return boundedAnchor
+        val projectedPage = (naturalTargetOffset / pageExtent).roundToInt().coerceIn(0, pageCount - 1)
+        return projectedPage.coerceIn(boundedAnchor - 1, boundedAnchor + 1).coerceIn(0, pageCount - 1)
+    }
+
+    private companion object {
+        const val INVALID_POINTER_ID = -1
+    }
+}
