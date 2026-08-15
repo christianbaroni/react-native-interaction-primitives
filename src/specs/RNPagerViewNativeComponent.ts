@@ -1,6 +1,5 @@
 import type * as React from 'react';
-import { codegenNativeComponent, type HostComponent, type ViewProps } from 'react-native';
-import codegenNativeCommands from 'react-native/Libraries/Utilities/codegenNativeCommands';
+import { codegenNativeCommands, codegenNativeComponent, type HostComponent, type ViewProps } from 'react-native';
 import type { DirectEventHandler, Float, Int32, WithDefault } from 'react-native/Libraries/Types/CodegenTypes';
 
 export type NativePagerState = Readonly<{
