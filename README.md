@@ -123,6 +123,7 @@ The ref exposes `open`, `close`, and `toggle`; each accepts `{ animated?: boolea
 - `contentCornerRadius?: number` — defaults to the native screen radius; set `0` to disable clipping. iOS uses a continuous corner curve.
 - `drawerWidth: number` — required reveal distance and drawer layout width.
 - `gestureEnabled?: boolean` — enables native drag gestures; commands and tap-to-close remain available.
+- `gestureReleaseHaptic?: HapticFeedbackType` — triggers once when a released swipe selects its open or closed target. Commands, taps, cancellation, initial state, and animation completion never trigger it.
 - `initialOpen?: boolean` — selects the initial native endpoint without creating a controlled state loop.
 - `motion?: SideDrawerMotion` — declarative native interpolation for drawer/content opacity, uniform scale, `translateX`, `translateY`, and overlay color/opacity.
 - `side?: 'start' | 'end'` — logical drawer side, resolved through native layout direction.
@@ -138,6 +139,18 @@ Each motion channel has matching `inputRange` and `outputRange` arrays with at l
 Drawer transforms are applied to a full-screen native underlay host, so scale and translation keep a stable screen-relative origin throughout reveal. `drawerWidth` still owns both reveal distance and the caller drawer content's layout width.
 
 The motion description is validated and flattened once per `motion` object, then compiled into native line segments when that prop changes. Native progress evaluates those segments directly on every display frame. It does not schedule React renders, JavaScript callbacks, Reanimated worklets, layout passes, or frame-time allocations. Overlay color is constant for a motion description; its opacity is interpolated.
+
+`HapticFeedbackType` is `selection`, `light`, `medium`, `heavy`, `soft`, `rigid`, `success`, `warning`, or `error`. These names match the native iOS feedback families. Android maps them to the closest available system feedback and respects the user's system haptic settings. iOS prepares the configured generator when a valid drag begins so confirmation remains aligned with release target selection.
+
+| Type                         | Android feedback                                           |
+| ---------------------------- | ---------------------------------------------------------- |
+| `selection`                  | segment tick on Android 14+, clock tick otherwise          |
+| `soft`                       | frequent segment tick on Android 14+, clock tick otherwise |
+| `light` / `medium` / `heavy` | keyboard tap / virtual key / long press                    |
+| `rigid`                      | context click                                              |
+| `success`                    | confirm on Android 11+, virtual key otherwise              |
+| `warning`                    | context click                                              |
+| `error`                      | reject on Android 11+, long press otherwise                |
 
 ## Reanimated observation
 

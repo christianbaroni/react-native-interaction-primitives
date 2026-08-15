@@ -80,6 +80,14 @@ describe('SideDrawer API', () => {
     expect(lastNativeProps('RNSideDrawerView').contentCornerRadius).toBe(0);
   });
 
+  it('enables release haptics only when a feedback type is present', () => {
+    const { rerender } = render(drawer());
+    expect(lastNativeProps('RNSideDrawerView').gestureReleaseHaptic).toBe('none');
+
+    rerender(drawer(undefined, { gestureReleaseHaptic: 'soft' }));
+    expect(lastNativeProps('RNSideDrawerView').gestureReleaseHaptic).toBe('soft');
+  });
+
   it('compiles declarative motion into one native configuration', () => {
     const motion = {
       drawer: {

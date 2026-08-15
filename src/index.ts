@@ -20,5 +20,6 @@ export type {
   SideDrawerProps,
   SideDrawerRef,
 } from './types';
+export type { HapticFeedbackType } from './haptics';
 
 export { Pager, SideDrawer };

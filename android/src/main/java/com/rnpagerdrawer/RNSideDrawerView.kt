@@ -77,6 +77,7 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
     private var activePointerId = INVALID_POINTER_ID
     private var gestureEligible = false
     private var isDragging = false
+    private var hasDragged = false
     private var downX = 0f
     private var downY = 0f
     private var dragStartX = 0f
@@ -114,6 +115,8 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
                 finishTouch()
             }
         }
+
+    var gestureReleaseHaptic: RNHapticFeedback? = null
 
     var initialOpen: Boolean = false
         set(value) {
@@ -207,6 +210,7 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
                     (rawRevealPx < laidOutDrawerWidthPx || revealDelta < 0f)
                 if (canMove && abs(deltaX) > touchSlop && abs(deltaX) > abs(deltaY)) {
                     beginDragging(event.getX(pointerIndex))
+                    hasDragged = true
                     parent?.requestDisallowInterceptTouchEvent(true)
                     return true
                 }
@@ -226,6 +230,9 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
                 if (pointerIndex < 0) return false
                 val x = event.getX(pointerIndex)
                 if (isDragging) {
+                    val deltaX = x - dragStartX
+                    val deltaY = event.getY(pointerIndex) - downY
+                    if (abs(deltaX) > touchSlop && abs(deltaX) > abs(deltaY)) hasDragged = true
                     setDragRawRevealPx(dragStartRawRevealPx + (x - dragStartX) * revealDirection())
                     publishProgress()
                 }
@@ -236,7 +243,7 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
                     val tracker = ensureVelocityTracker()
                     tracker.computeCurrentVelocity(1000, maximumFlingVelocity.toFloat())
                     val revealVelocity = tracker.getXVelocity(activePointerId) * revealDirection()
-                    settleFromRelease(revealVelocity)
+                    settleFromRelease(revealVelocity, hasDragged)
                 }
                 finishTouch()
                 return true
@@ -355,9 +362,11 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
         settleToOpen(nextOpen, SettlingSource.Programmatic, animated, initialVelocity)
     }
 
-    private fun settleFromRelease(velocityPxPerSecond: Float) {
+    private fun settleFromRelease(velocityPxPerSecond: Float, performHaptic: Boolean) {
         val naturalReveal = naturalTargetReveal(presentedRevealPx(), velocityPxPerSecond)
-        settleToOpen(naturalReveal >= laidOutDrawerWidthPx * 0.5f, SettlingSource.Release, true, velocityPxPerSecond)
+        val nextOpen = naturalReveal >= laidOutDrawerWidthPx * 0.5f
+        if (performHaptic) gestureReleaseHaptic?.perform(this)
+        settleToOpen(nextOpen, SettlingSource.Release, true, velocityPxPerSecond)
     }
 
     private fun settleToOpen(
@@ -449,6 +458,7 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
         downX = event.x
         downY = event.y
         isDragging = false
+        hasDragged = false
     }
 
     private fun beginDragging(currentX: Float) {
@@ -470,6 +480,7 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
         activePointerId = INVALID_POINTER_ID
         gestureEligible = false
         isDragging = false
+        hasDragged = false
         velocityTracker?.recycle()
         velocityTracker = null
     }

@@ -1,5 +1,6 @@
 import type * as React from 'react';
 import type { ColorValue, ViewProps } from 'react-native';
+import type { HapticFeedbackType } from './haptics';
 
 export type PagerPhase =
   | { kind: 'empty' }
@@ -102,6 +103,7 @@ export type SideDrawerProps = ViewProps & {
   drawer: React.ReactElement;
   drawerWidth: number;
   gestureEnabled?: boolean;
+  gestureReleaseHaptic?: HapticFeedbackType;
   initialOpen?: boolean;
   motion?: SideDrawerMotion;
   onOpenChange?: (open: boolean) => void;

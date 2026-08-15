@@ -3,6 +3,7 @@
 #import "RNSideDrawerContentView.h"
 #import "RNSideDrawerPanelView.h"
 #import "RNSideDrawerSlots.h"
+#import "RNPagerDrawerHapticFeedback.h"
 
 #import <React/UIView+React.h>
 #import <QuartzCore/QuartzCore.h>
@@ -117,6 +118,7 @@ using RNSideDrawerMotion = std::array<RNSideDrawerInterpolation, RNSideDrawerMot
   RNSideDrawerPhase _phase;
   RNSideDrawerSettlingSource _settlingSource;
   CADisplayLink *_settleDisplayLink;
+  RNPagerDrawerHapticFeedback *_hapticFeedback;
   BOOL _settleActive;
   BOOL _settlePausedForTracking;
   BOOL _hasLaidOut;
@@ -335,6 +337,21 @@ static RNSideDrawerMotion RNSideDrawerCompileMotion(NSArray<NSNumber *> *config)
   if (!gestureEnabled && _phase == RNSideDrawerPhaseDragging) {
     [self setOpen:[self progress] >= 0.5 animated:YES source:RNSideDrawerSettlingSourceRelease];
   }
+}
+
+- (void)setGestureReleaseHaptic:(NSString *)gestureReleaseHaptic
+{
+  if (gestureReleaseHaptic.length == 0 || [gestureReleaseHaptic isEqualToString:@"none"]) {
+    _hapticFeedback = nil;
+    return;
+  }
+  if (_hapticFeedback == nil) _hapticFeedback = [RNPagerDrawerHapticFeedback new];
+  _hapticFeedback.type = gestureReleaseHaptic;
+}
+
+- (NSString *)gestureReleaseHaptic
+{
+  return _hapticFeedback.type ?: @"none";
 }
 
 - (void)setInitialOpen:(BOOL)initialOpen
@@ -560,6 +577,7 @@ static RNSideDrawerMotion RNSideDrawerCompileMotion(NSArray<NSNumber *> *config)
   _releaseRevealVelocity = 0;
   _settlingSource = RNSideDrawerSettlingSourceNone;
   _phase = RNSideDrawerPhaseDragging;
+  [_hapticFeedback prepare];
   [self publishProgress];
 }
 
@@ -586,6 +604,7 @@ static RNSideDrawerMotion RNSideDrawerCompileMotion(NSArray<NSNumber *> *config)
   _targetOpen = targetOpen;
   _settlingSource = RNSideDrawerSettlingSourceRelease;
   _phase = RNSideDrawerPhaseSettling;
+  [_hapticFeedback trigger];
   targetContentOffset->x = currentOffset;
   targetContentOffset->y = 0;
   [self publishProgress];
@@ -606,6 +625,9 @@ static RNSideDrawerMotion RNSideDrawerCompileMotion(NSArray<NSNumber *> *config)
     _releaseRevealVelocity = revealVelocity;
     _settlingSource = RNSideDrawerSettlingSourceRelease;
     _phase = RNSideDrawerPhaseSettling;
+    if (_scrollView.panGestureRecognizer.state == UIGestureRecognizerStateEnded) {
+      [_hapticFeedback trigger];
+    }
   }
   if (_phase != RNSideDrawerPhaseSettling) return;
   CGFloat offset = [self currentPhysicalOffset];

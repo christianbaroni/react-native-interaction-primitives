@@ -77,6 +77,7 @@ class SideDrawerImplementation extends React.PureComponent<SideDrawerProps> impl
       drawer,
       drawerWidth,
       gestureEnabled = true,
+      gestureReleaseHaptic = 'none',
       initialOpen = false,
       motion,
       onOpenChange,
@@ -99,6 +100,7 @@ class SideDrawerImplementation extends React.PureComponent<SideDrawerProps> impl
         contentCornerRadius={contentCornerRadius ?? -1}
         drawerWidth={drawerWidth}
         gestureEnabled={gestureEnabled}
+        gestureReleaseHaptic={gestureReleaseHaptic}
         initialOpen={initialOpen}
         motionConfig={motionConfig}
         onOpenChange={onOpenChange ? this.handleOpenChange : undefined}

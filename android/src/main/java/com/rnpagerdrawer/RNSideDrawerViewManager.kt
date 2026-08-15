@@ -68,6 +68,11 @@ internal class RNSideDrawerViewManager :
         view.gestureEnabled = value
     }
 
+    @ReactProp(name = "gestureReleaseHaptic")
+    override fun setGestureReleaseHaptic(view: RNSideDrawerView, value: String?) {
+        view.gestureReleaseHaptic = RNHapticFeedback.fromName(value)
+    }
+
     @ReactProp(name = "initialOpen", defaultBoolean = false)
     override fun setInitialOpen(view: RNSideDrawerView, value: Boolean) {
         view.initialOpen = value

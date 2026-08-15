@@ -39,6 +39,33 @@ static Source RNSideDrawerSourceValue(NSDictionary *payload)
   return Source::None;
 }
 
+static NSString *RNSideDrawerHapticValue(RNSideDrawerViewGestureReleaseHaptic value)
+{
+  switch (value) {
+    case RNSideDrawerViewGestureReleaseHaptic::Selection:
+      return @"selection";
+    case RNSideDrawerViewGestureReleaseHaptic::Light:
+      return @"light";
+    case RNSideDrawerViewGestureReleaseHaptic::Medium:
+      return @"medium";
+    case RNSideDrawerViewGestureReleaseHaptic::Heavy:
+      return @"heavy";
+    case RNSideDrawerViewGestureReleaseHaptic::Soft:
+      return @"soft";
+    case RNSideDrawerViewGestureReleaseHaptic::Rigid:
+      return @"rigid";
+    case RNSideDrawerViewGestureReleaseHaptic::Success:
+      return @"success";
+    case RNSideDrawerViewGestureReleaseHaptic::Warning:
+      return @"warning";
+    case RNSideDrawerViewGestureReleaseHaptic::Error:
+      return @"error";
+    case RNSideDrawerViewGestureReleaseHaptic::None:
+      return @"none";
+  }
+  return @"none";
+}
+
 @interface RNSideDrawerPanelViewComponentView : RCTViewComponentView <RCTRNSideDrawerPanelViewViewProtocol, RNSideDrawerPanelSlot>
 @end
 
@@ -226,6 +253,9 @@ static Source RNSideDrawerSourceValue(NSDictionary *payload)
   if (oldViewProps.gestureEnabled != newViewProps.gestureEnabled) {
     _drawerView.gestureEnabled = newViewProps.gestureEnabled;
   }
+  if (oldViewProps.gestureReleaseHaptic != newViewProps.gestureReleaseHaptic) {
+    _drawerView.gestureReleaseHaptic = RNSideDrawerHapticValue(newViewProps.gestureReleaseHaptic);
+  }
   if (oldViewProps.initialOpen != newViewProps.initialOpen) {
     _drawerView.initialOpen = newViewProps.initialOpen;
   }
@@ -348,6 +378,7 @@ RCT_EXPORT_MODULE(RNSideDrawerView)
 RCT_EXPORT_VIEW_PROPERTY(drawerWidth, CGFloat)
 RCT_EXPORT_VIEW_PROPERTY(contentCornerRadius, CGFloat)
 RCT_EXPORT_VIEW_PROPERTY(gestureEnabled, BOOL)
+RCT_EXPORT_VIEW_PROPERTY(gestureReleaseHaptic, NSString)
 RCT_EXPORT_VIEW_PROPERTY(initialOpen, BOOL)
 RCT_EXPORT_VIEW_PROPERTY(motionConfig, NSArray)
 RCT_EXPORT_VIEW_PROPERTY(openChangeEventsEnabled, BOOL)

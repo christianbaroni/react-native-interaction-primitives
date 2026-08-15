@@ -17,6 +17,10 @@ export interface NativeProps extends ViewProps {
   contentCornerRadius?: WithDefault<Float, -1>;
   drawerWidth: Float;
   gestureEnabled?: WithDefault<boolean, true>;
+  gestureReleaseHaptic?: WithDefault<
+    'none' | 'selection' | 'light' | 'medium' | 'heavy' | 'soft' | 'rigid' | 'success' | 'warning' | 'error',
+    'none'
+  >;
   initialOpen?: WithDefault<boolean, false>;
   motionConfig?: ReadonlyArray<Float>;
   onOpenChange?: DirectEventHandler<NativeSideDrawerOpenChange>;

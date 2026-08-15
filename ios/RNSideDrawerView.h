@@ -12,6 +12,7 @@ typedef NS_ENUM(NSInteger, RNSideDrawerSide) {
 @property (nonatomic, assign) CGFloat contentCornerRadius;
 @property (nonatomic, assign) CGFloat drawerWidth;
 @property (nonatomic, assign) BOOL gestureEnabled;
+@property (nonatomic, copy) NSString *gestureReleaseHaptic;
 @property (nonatomic, assign) BOOL initialOpen;
 @property (nonatomic, copy) NSArray<NSNumber *> *motionConfig;
 @property (nonatomic, assign) BOOL openChangeEventsEnabled;
