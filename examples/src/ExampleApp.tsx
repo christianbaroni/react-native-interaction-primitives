@@ -1,5 +1,6 @@
 import * as React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { PagerExample } from './PagerExample';
 import { SideDrawerExample } from './SideDrawerExample';
 
@@ -7,15 +8,19 @@ type Example = 'pager' | 'drawer';
 
 export function ExampleApp(): React.JSX.Element {
   const [example, setExample] = React.useState<Example>('drawer');
+  const navigation = (
+    <View style={styles.switcher}>
+      <ExampleButton active={example === 'pager'} label="Pager" onPress={() => setExample('pager')} />
+      <ExampleButton active={example === 'drawer'} label="Side drawer" onPress={() => setExample('drawer')} />
+    </View>
+  );
 
   return (
-    <View style={styles.root}>
-      <View style={styles.switcher}>
-        <ExampleButton active={example === 'pager'} label="Pager" onPress={() => setExample('pager')} />
-        <ExampleButton active={example === 'drawer'} label="Side drawer" onPress={() => setExample('drawer')} />
+    <SafeAreaProvider>
+      <View style={styles.root}>
+        {example === 'pager' ? <PagerExample navigation={navigation} /> : <SideDrawerExample navigation={navigation} />}
       </View>
-      <View style={styles.stage}>{example === 'pager' ? <PagerExample /> : <SideDrawerExample />}</View>
-    </View>
+    </SafeAreaProvider>
   );
 }
 
@@ -32,16 +37,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#0D1014',
     flex: 1,
   },
-  stage: {
-    flex: 1,
-  },
   switcher: {
-    backgroundColor: '#0D1014',
     flexDirection: 'row',
     gap: 8,
-    paddingBottom: 10,
-    paddingHorizontal: 12,
-    paddingTop: 14,
   },
   switcherButton: {
     borderRadius: 12,

@@ -118,7 +118,19 @@ static Source RNSideDrawerSourceValue(NSDictionary *payload)
 
 - (void)setDrawerProgress:(CGFloat)progress
 {
-  _scrimView.userInteractionEnabled = progress > 0.001;
+  BOOL enabled = progress > 0.001;
+  if (_scrimView.userInteractionEnabled != enabled) _scrimView.userInteractionEnabled = enabled;
+}
+
+- (void)setDrawerOverlayColor:(UIColor *)color
+{
+  _scrimView.backgroundColor = color;
+}
+
+- (void)setDrawerOverlayOpacity:(CGFloat)opacity
+{
+  CGFloat boundedOpacity = MIN(1, MAX(0, opacity));
+  if (_scrimView.alpha != boundedOpacity) _scrimView.alpha = boundedOpacity;
 }
 
 - (void)mountChildComponentView:(UIView<RCTComponentViewProtocol> *)childComponentView index:(NSInteger)index
@@ -205,11 +217,11 @@ static Source RNSideDrawerSourceValue(NSDictionary *payload)
 {
   const auto &oldViewProps = static_cast<const RNSideDrawerViewProps &>(*_props);
   const auto &newViewProps = static_cast<const RNSideDrawerViewProps &>(*props);
+  if (oldViewProps.contentCornerRadius != newViewProps.contentCornerRadius) {
+    _drawerView.contentCornerRadius = newViewProps.contentCornerRadius;
+  }
   if (oldViewProps.drawerWidth != newViewProps.drawerWidth) {
     _drawerView.drawerWidth = newViewProps.drawerWidth;
-  }
-  if (oldViewProps.edgeWidth != newViewProps.edgeWidth) {
-    _drawerView.edgeWidth = newViewProps.edgeWidth;
   }
   if (oldViewProps.gestureEnabled != newViewProps.gestureEnabled) {
     _drawerView.gestureEnabled = newViewProps.gestureEnabled;
@@ -217,8 +229,16 @@ static Source RNSideDrawerSourceValue(NSDictionary *payload)
   if (oldViewProps.initialOpen != newViewProps.initialOpen) {
     _drawerView.initialOpen = newViewProps.initialOpen;
   }
+  if (oldViewProps.motionConfig != newViewProps.motionConfig) {
+    NSMutableArray<NSNumber *> *config = [NSMutableArray arrayWithCapacity:newViewProps.motionConfig.size()];
+    for (Float value : newViewProps.motionConfig) [config addObject:@(value)];
+    _drawerView.motionConfig = config;
+  }
   if (oldViewProps.openChangeEventsEnabled != newViewProps.openChangeEventsEnabled) {
     _drawerView.openChangeEventsEnabled = newViewProps.openChangeEventsEnabled;
+  }
+  if (oldViewProps.overlayColor != newViewProps.overlayColor) {
+    _drawerView.overlayColor = RCTUIColorFromSharedColor(newViewProps.overlayColor);
   }
   if (oldViewProps.progressEventsEnabled != newViewProps.progressEventsEnabled) {
     _drawerView.progressEventsEnabled = newViewProps.progressEventsEnabled;
@@ -326,10 +346,12 @@ RCT_EXPORT_MODULE(RNSideDrawerView)
 }
 
 RCT_EXPORT_VIEW_PROPERTY(drawerWidth, CGFloat)
-RCT_EXPORT_VIEW_PROPERTY(edgeWidth, CGFloat)
+RCT_EXPORT_VIEW_PROPERTY(contentCornerRadius, CGFloat)
 RCT_EXPORT_VIEW_PROPERTY(gestureEnabled, BOOL)
 RCT_EXPORT_VIEW_PROPERTY(initialOpen, BOOL)
+RCT_EXPORT_VIEW_PROPERTY(motionConfig, NSArray)
 RCT_EXPORT_VIEW_PROPERTY(openChangeEventsEnabled, BOOL)
+RCT_EXPORT_VIEW_PROPERTY(overlayColor, UIColor)
 RCT_EXPORT_VIEW_PROPERTY(progressEventsEnabled, BOOL)
 RCT_EXPORT_VIEW_PROPERTY(onOpenChange, RCTDirectEventBlock)
 RCT_EXPORT_VIEW_PROPERTY(onProgress, RCTDirectEventBlock)

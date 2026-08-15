@@ -9,6 +9,8 @@ NS_ASSUME_NONNULL_BEGIN
 
 - (void)insertReactSubview:(UIView *)subview atIndex:(NSInteger)atIndex;
 - (void)removeReactSubview:(UIView *)subview;
+- (void)setDrawerOverlayColor:(UIColor *)color;
+- (void)setDrawerOverlayOpacity:(CGFloat)opacity;
 - (void)setDrawerProgress:(CGFloat)progress;
 @end
 

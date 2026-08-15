@@ -1,6 +1,7 @@
 package com.rnpagerdrawer
 
 import android.view.View
+import com.facebook.react.bridge.ReadableArray
 import com.facebook.react.module.annotations.ReactModule
 import com.facebook.react.uimanager.PixelUtil
 import com.facebook.react.uimanager.ThemedReactContext
@@ -57,9 +58,9 @@ internal class RNSideDrawerViewManager :
         view.drawerWidthPx = PixelUtil.toPixelFromDIP(value)
     }
 
-    @ReactProp(name = "edgeWidth", defaultFloat = 24f)
-    override fun setEdgeWidth(view: RNSideDrawerView, value: Float) {
-        view.edgeWidthPx = PixelUtil.toPixelFromDIP(value)
+    @ReactProp(name = "contentCornerRadius", defaultFloat = -1f)
+    override fun setContentCornerRadius(view: RNSideDrawerView, value: Float) {
+        view.contentCornerRadiusPx = if (value < 0f) value else PixelUtil.toPixelFromDIP(value)
     }
 
     @ReactProp(name = "gestureEnabled", defaultBoolean = true)
@@ -72,9 +73,19 @@ internal class RNSideDrawerViewManager :
         view.initialOpen = value
     }
 
+    @ReactProp(name = "motionConfig")
+    override fun setMotionConfig(view: RNSideDrawerView, value: ReadableArray?) {
+        view.setMotionConfig(value)
+    }
+
     @ReactProp(name = "openChangeEventsEnabled", defaultBoolean = false)
     override fun setOpenChangeEventsEnabled(view: RNSideDrawerView, value: Boolean) {
         view.openChangeEventsEnabled = value
+    }
+
+    @ReactProp(name = "overlayColor", customType = "Color")
+    override fun setOverlayColor(view: RNSideDrawerView, value: Int?) {
+        view.setOverlayColor(value)
     }
 
     @ReactProp(name = "progressEventsEnabled", defaultBoolean = false)

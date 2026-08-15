@@ -1,8 +1,9 @@
 import * as React from 'react';
-import { StyleSheet } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import NativeSideDrawerContentView from './specs/RNSideDrawerContentViewNativeComponent';
 import NativeSideDrawerPanelView from './specs/RNSideDrawerPanelViewNativeComponent';
 import NativeSideDrawerView, { Commands, type NativeSideDrawerOpenChange } from './specs/RNSideDrawerViewNativeComponent';
+import { compileSideDrawerMotion } from './sideDrawerMotion';
 import type { SideDrawerCommandOptions, SideDrawerProps, SideDrawerRef } from './types';
 
 type NativeSideDrawerRef = React.ComponentRef<typeof NativeSideDrawerView> | null;
@@ -20,13 +21,15 @@ function requirePositiveFinite(value: number, name: string): void {
   }
 }
 
-function requireNonnegativeFinite(value: number, name: string): void {
+function requireNonNegativeFinite(value: number, name: string): void {
   if (!Number.isFinite(value) || value < 0) {
-    throw new RangeError(`${name} must be a finite nonnegative number.`);
+    throw new RangeError(`${name} must be a finite number greater than or equal to zero.`);
   }
 }
 
 class SideDrawerImplementation extends React.PureComponent<SideDrawerProps> implements SideDrawerRef {
+  private compiledMotion: readonly number[] | undefined;
+  private compiledMotionSource: SideDrawerProps['motion'];
   private nativeRef: NativeSideDrawerRef = null;
 
   getAnimatableRef() {
@@ -58,15 +61,24 @@ class SideDrawerImplementation extends React.PureComponent<SideDrawerProps> impl
     this.props.onOpenChange?.(event.nativeEvent.open);
   };
 
+  private motionConfigFor(motion: SideDrawerProps['motion']): readonly number[] {
+    if (this.compiledMotion == null || this.compiledMotionSource !== motion) {
+      this.compiledMotionSource = motion;
+      this.compiledMotion = compileSideDrawerMotion(motion);
+    }
+    return this.compiledMotion;
+  }
+
   render() {
     const internalProps: SideDrawerInternalProps = this.props;
     const {
       children,
+      contentCornerRadius,
       drawer,
       drawerWidth,
-      edgeWidth = 24,
       gestureEnabled = true,
       initialOpen = false,
+      motion,
       onOpenChange,
       onProgress,
       side = 'start',
@@ -75,7 +87,8 @@ class SideDrawerImplementation extends React.PureComponent<SideDrawerProps> impl
     } = internalProps;
 
     requirePositiveFinite(drawerWidth, 'drawerWidth');
-    requireNonnegativeFinite(edgeWidth, 'edgeWidth');
+    if (contentCornerRadius != null) requireNonNegativeFinite(contentCornerRadius, 'contentCornerRadius');
+    const motionConfig = this.motionConfigFor(motion);
 
     // Reanimated Paper subscriptions use RN's normalized top* event name.
     void topProgress;
@@ -83,22 +96,26 @@ class SideDrawerImplementation extends React.PureComponent<SideDrawerProps> impl
     return (
       <NativeSideDrawerView
         {...props}
+        contentCornerRadius={contentCornerRadius ?? -1}
         drawerWidth={drawerWidth}
-        edgeWidth={edgeWidth}
         gestureEnabled={gestureEnabled}
         initialOpen={initialOpen}
+        motionConfig={motionConfig}
         onOpenChange={onOpenChange ? this.handleOpenChange : undefined}
         onProgress={onProgress}
         openChangeEventsEnabled={onOpenChange != null}
+        overlayColor={motion?.overlay?.color ?? 'transparent'}
         progressEventsEnabled={onProgress != null || topProgress != null}
         ref={this.setNativeRef}
         side={side}
       >
-        <NativeSideDrawerPanelView
-          collapsable={false}
-          style={[styles.panel, side === 'start' ? styles.panelStart : styles.panelEnd, { width: drawerWidth }]}
-        >
-          {drawer}
+        <NativeSideDrawerPanelView collapsable={false} style={styles.panel}>
+          <View
+            collapsable={false}
+            style={[styles.drawerContent, side === 'start' ? styles.drawerContentStart : styles.drawerContentEnd, { width: drawerWidth }]}
+          >
+            {drawer}
+          </View>
         </NativeSideDrawerPanelView>
         <NativeSideDrawerContentView collapsable={false} style={styles.content}>
           {children}
@@ -109,18 +126,19 @@ class SideDrawerImplementation extends React.PureComponent<SideDrawerProps> impl
 }
 
 const styles = StyleSheet.create({
-  content: StyleSheet.absoluteFillObject,
-  panel: {
+  content: StyleSheet.absoluteFill,
+  drawerContent: {
     bottom: 0,
     position: 'absolute',
     top: 0,
   },
-  panelEnd: {
+  drawerContentEnd: {
     end: 0,
   },
-  panelStart: {
+  drawerContentStart: {
     start: 0,
   },
+  panel: StyleSheet.absoluteFill,
 });
 
 export const SideDrawer: SideDrawerClass = SideDrawerImplementation;

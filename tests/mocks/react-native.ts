@@ -1,4 +1,6 @@
+import * as React from 'react';
 import codegenNativeComponent from './codegenNativeComponent';
+import codegenNativeCommands from './codegenNativeCommands';
 
 export type HostComponent<Props> = (props: Props) => unknown;
 export type ViewProps = Record<string, unknown>;
@@ -31,6 +33,13 @@ export function __getMockNodeHandle(value: object): number | null {
 }
 
 export const StyleSheet = {
+  absoluteFillObject: {
+    bottom: 0,
+    left: 0,
+    position: 'absolute',
+    right: 0,
+    top: 0,
+  },
   create<T>(styles: T): T {
     return styles;
   },
@@ -43,7 +52,7 @@ export const Platform = {
   },
 };
 
-export { codegenNativeComponent };
+export { codegenNativeCommands, codegenNativeComponent };
 
 export function useWindowDimensions() {
   return { width: 390, height: 844, scale: 3, fontScale: 1 };
@@ -51,4 +60,8 @@ export function useWindowDimensions() {
 
 export function ScrollView(props: Record<string, unknown>) {
   return props;
+}
+
+export function View(props: Record<string, unknown>) {
+  return React.createElement('div', props);
 }

@@ -12,6 +12,8 @@ export type {
   PagerSetPageOptions,
   PagerState,
   SideDrawerCommandOptions,
+  SideDrawerInterpolation,
+  SideDrawerMotion,
   SideDrawerPhase,
   SideDrawerProgressEvent,
   SideDrawerProgressNativeEvent,

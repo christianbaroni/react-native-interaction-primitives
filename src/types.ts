@@ -1,5 +1,5 @@
 import type * as React from 'react';
-import type { ViewProps } from 'react-native';
+import type { ColorValue, ViewProps } from 'react-native';
 
 export type PagerPhase =
   | { kind: 'empty' }
@@ -71,13 +71,39 @@ export type SideDrawerProgressNativeEvent = Readonly<{
   nativeEvent: SideDrawerProgressEvent;
 }>;
 
+export type SideDrawerInterpolation = Readonly<{
+  inputRange: readonly number[];
+  outputRange: readonly number[];
+}>;
+
+export type SideDrawerMotion = Readonly<{
+  content?: Readonly<{
+    opacity?: SideDrawerInterpolation;
+    scale?: SideDrawerInterpolation;
+    translateX?: SideDrawerInterpolation;
+    translateY?: SideDrawerInterpolation;
+  }>;
+  drawer?: Readonly<{
+    opacity?: SideDrawerInterpolation;
+    scale?: SideDrawerInterpolation;
+    translateX?: SideDrawerInterpolation;
+    translateY?: SideDrawerInterpolation;
+  }>;
+  overlay?: Readonly<{
+    color?: ColorValue;
+    opacity?: SideDrawerInterpolation;
+  }>;
+}>;
+
 export type SideDrawerProps = ViewProps & {
   children: React.ReactElement;
+  /** Native screen corner radius by default. Set to `0` to disable clipping. */
+  contentCornerRadius?: number;
   drawer: React.ReactElement;
   drawerWidth: number;
-  edgeWidth?: number;
   gestureEnabled?: boolean;
   initialOpen?: boolean;
+  motion?: SideDrawerMotion;
   onOpenChange?: (open: boolean) => void;
   onProgress?: (event: SideDrawerProgressNativeEvent) => void;
   side?: 'start' | 'end';

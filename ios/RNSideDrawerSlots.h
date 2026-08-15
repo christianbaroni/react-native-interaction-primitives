@@ -7,6 +7,8 @@ NS_ASSUME_NONNULL_BEGIN
 
 @protocol RNSideDrawerContentSlot <NSObject>
 @property (nonatomic, copy, nullable) dispatch_block_t onScrimPress;
+- (void)setDrawerOverlayColor:(UIColor *)color;
+- (void)setDrawerOverlayOpacity:(CGFloat)opacity;
 - (void)setDrawerProgress:(CGFloat)progress;
 @end
 

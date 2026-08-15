@@ -30,7 +30,19 @@
 
 - (void)setDrawerProgress:(CGFloat)progress
 {
-  _scrimView.userInteractionEnabled = progress > 0.001;
+  BOOL enabled = progress > 0.001;
+  if (_scrimView.userInteractionEnabled != enabled) _scrimView.userInteractionEnabled = enabled;
+}
+
+- (void)setDrawerOverlayColor:(UIColor *)color
+{
+  _scrimView.backgroundColor = color;
+}
+
+- (void)setDrawerOverlayOpacity:(CGFloat)opacity
+{
+  CGFloat boundedOpacity = MIN(1, MAX(0, opacity));
+  if (_scrimView.alpha != boundedOpacity) _scrimView.alpha = boundedOpacity;
 }
 
 #pragma clang diagnostic push

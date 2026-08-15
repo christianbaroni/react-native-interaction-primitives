@@ -67,7 +67,47 @@ describe('SideDrawer API', () => {
 
   it('validates product geometry before crossing the native boundary', () => {
     expect(() => render(drawer(undefined, { drawerWidth: 0 }))).toThrow('drawerWidth must be a finite number greater than zero.');
-    expect(() => render(drawer(undefined, { edgeWidth: -1 }))).toThrow('edgeWidth must be a finite nonnegative number.');
+    expect(() => render(drawer(undefined, { contentCornerRadius: -1 }))).toThrow(
+      'contentCornerRadius must be a finite number greater than or equal to zero.'
+    );
+  });
+
+  it('defaults content clipping to the native screen radius', () => {
+    const { rerender } = render(drawer());
+    expect(lastNativeProps('RNSideDrawerView').contentCornerRadius).toBe(-1);
+
+    rerender(drawer(undefined, { contentCornerRadius: 0 }));
+    expect(lastNativeProps('RNSideDrawerView').contentCornerRadius).toBe(0);
+  });
+
+  it('compiles declarative motion into one native configuration', () => {
+    const motion = {
+      drawer: {
+        opacity: { inputRange: [0, 0.9], outputRange: [0.1, 1] },
+        scale: { inputRange: [0, 1], outputRange: [0.94, 1] },
+      },
+      overlay: {
+        color: '#112233',
+        opacity: { inputRange: [0, 1], outputRange: [0, 0.4] },
+      },
+    } as const;
+    const { rerender } = render(drawer(undefined, { motion }));
+    const firstMotionConfig = lastNativeProps('RNSideDrawerView').motionConfig;
+
+    expect(lastNativeProps('RNSideDrawerView')).toMatchObject({
+      motionConfig: [2, 2, 0, 0, 0, 0, 0, 0, 2, 0, 0.1, 0.9, 1, 0, 0.94, 1, 1, 0, 0, 1, 0.4],
+      overlayColor: '#112233',
+    });
+
+    rerender(
+      drawer(undefined, {
+        motion,
+        style: {
+          flex: 1,
+        },
+      })
+    );
+    expect(lastNativeProps('RNSideDrawerView').motionConfig).toBe(firstMotionConfig);
   });
 
   it('dispatches native open, close, and toggle commands through its ref', () => {

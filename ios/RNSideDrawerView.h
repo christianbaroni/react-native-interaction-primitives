@@ -9,11 +9,13 @@ typedef NS_ENUM(NSInteger, RNSideDrawerSide) {
 };
 
 @interface RNSideDrawerView : UIView
+@property (nonatomic, assign) CGFloat contentCornerRadius;
 @property (nonatomic, assign) CGFloat drawerWidth;
-@property (nonatomic, assign) CGFloat edgeWidth;
 @property (nonatomic, assign) BOOL gestureEnabled;
 @property (nonatomic, assign) BOOL initialOpen;
+@property (nonatomic, copy) NSArray<NSNumber *> *motionConfig;
 @property (nonatomic, assign) BOOL openChangeEventsEnabled;
+@property (nonatomic, strong) UIColor *overlayColor;
 @property (nonatomic, assign) BOOL progressEventsEnabled;
 @property (nonatomic, assign) RNSideDrawerSide side;
 @property (nonatomic, copy, nullable) void (^openChangeHandler)(NSDictionary *payload);

@@ -1,5 +1,6 @@
 package com.rnpagerdrawer
 
+import android.graphics.Color
 import android.view.MotionEvent
 import android.view.VelocityTracker
 import android.view.View
@@ -7,13 +8,12 @@ import android.view.ViewConfiguration
 import android.view.ViewGroup
 import android.widget.OverScroller
 import com.facebook.react.bridge.Arguments
+import com.facebook.react.bridge.ReadableArray
 import com.facebook.react.bridge.WritableMap
-import com.facebook.react.uimanager.PixelUtil
 import com.facebook.react.uimanager.ThemedReactContext
 import com.facebook.react.uimanager.UIManagerHelper
 import kotlin.math.abs
 import kotlin.math.max
-import kotlin.math.min
 import kotlin.math.roundToInt
 
 internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : ViewGroup(reactContext) {
@@ -35,11 +35,34 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
         Release,
     }
 
+    private class MotionSegment(
+        val upperInput: Float,
+        val slope: Float,
+        val intercept: Float,
+    )
+
+    private class MotionInterpolation(
+        val firstInput: Float,
+        val firstOutput: Float,
+        val lastInput: Float,
+        val lastOutput: Float,
+        val segments: Array<MotionSegment>,
+    ) {
+        fun evaluate(progress: Float): Float {
+            if (progress <= firstInput) return firstOutput
+            if (progress >= lastInput) return lastOutput
+            for (segment in segments) {
+                if (progress <= segment.upperInput) return segment.slope * progress + segment.intercept
+            }
+            return lastOutput
+        }
+    }
+
     private val slots = ArrayList<View>(2)
-    private val scroller = OverScroller(reactContext)
     private val targetResolverScroller = OverScroller(reactContext)
-    private val touchSlop = ViewConfiguration.get(reactContext).scaledTouchSlop
-    private val maximumFlingVelocity = ViewConfiguration.get(reactContext).scaledMaximumFlingVelocity
+    private val viewConfiguration = ViewConfiguration.get(reactContext)
+    private val touchSlop = viewConfiguration.scaledTouchSlop
+    private val maximumFlingVelocity = viewConfiguration.scaledMaximumFlingVelocity
 
     private var panelView: RNSideDrawerPanelView? = null
     private var contentView: RNSideDrawerContentView? = null
@@ -48,7 +71,7 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
     private var targetOpen = false
     private var open = false
     private var lastEmittedOpen = false
-    private var revealPx = 0f
+    private var rawRevealPx = 0f
     private var laidOutDrawerWidthPx = 0f
     private var hasLaidOut = false
     private var activePointerId = INVALID_POINTER_ID
@@ -56,9 +79,16 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
     private var isDragging = false
     private var downX = 0f
     private var downY = 0f
-    private var lastX = 0f
-    private var interruptedRevealVelocityPxPerSecond = 0f
+    private var dragStartX = 0f
+    private var dragStartRawRevealPx = 0f
+    private var settleStartTimeNanos = 0L
+    private var settleStartRawRevealPx = 0f
+    private var settleInitialVelocityPxPerSecond = 0f
+    private var settleVelocityPxPerSecond = 0f
+    private var settleRunning = false
     private var velocityTracker: VelocityTracker? = null
+    private var motion = arrayOfNulls<MotionInterpolation>(MOTION_CHANNEL_COUNT)
+    private var overlayColor = Color.TRANSPARENT
 
     var drawerWidthPx: Float = 0f
         set(value) {
@@ -68,9 +98,11 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
             requestLayout()
         }
 
-    var edgeWidthPx: Float = PixelUtil.toPixelFromDIP(24f)
+    var contentCornerRadiusPx: Float = -1f
         set(value) {
-            field = max(0f, value)
+            if (field == value) return
+            field = value
+            contentView?.contentCornerRadiusPx = value
         }
 
     var gestureEnabled: Boolean = true
@@ -113,43 +145,39 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
         setMeasuredDimension(measuredWidth, measuredHeight)
 
         val heightSpec = MeasureSpec.makeMeasureSpec(measuredHeight, MeasureSpec.EXACTLY)
-        val panelWidthSpec = MeasureSpec.makeMeasureSpec(drawerWidthPx.roundToInt(), MeasureSpec.EXACTLY)
         val contentWidthSpec = MeasureSpec.makeMeasureSpec(measuredWidth, MeasureSpec.EXACTLY)
-        panelView?.measure(panelWidthSpec, heightSpec)
+        panelView?.measure(contentWidthSpec, heightSpec)
         contentView?.measure(contentWidthSpec, heightSpec)
     }
 
     override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
         val firstLayout = !hasLaidOut
+        val settlingBeforeLayout = phase == Phase.Settling
+        if (settlingBeforeLayout) synchronizeSettleFrame()
         val resumeSettling = phase == Phase.Settling
-        if (resumeSettling) synchronizeScrollerFrame()
-        val preservedProgress = if (firstLayout) {
+        val resumeVelocity = if (resumeSettling) settleVelocityPxPerSecond else 0f
+        val preservedRawFraction = if (firstLayout) {
             if (initialOpen) 1f else 0f
         } else if (laidOutDrawerWidthPx > 0f) {
-            revealPx / laidOutDrawerWidthPx
+            rawRevealPx / laidOutDrawerWidthPx
         } else {
             0f
         }
-        val settlingTarget = targetOpen
-        if (resumeSettling) scroller.abortAnimation()
+        settleRunning = false
 
         laidOutDrawerWidthPx = drawerWidthPx
         val hostWidth = right - left
         val hostHeight = bottom - top
-        if (revealDirection() > 0) {
-            panelView?.layout(0, 0, laidOutDrawerWidthPx.roundToInt(), hostHeight)
-        } else {
-            val panelLeft = hostWidth - laidOutDrawerWidthPx.roundToInt()
-            panelView?.layout(panelLeft, 0, hostWidth, hostHeight)
-        }
+        panelView?.layout(0, 0, hostWidth, hostHeight)
         contentView?.layout(0, 0, hostWidth, hostHeight)
         hasLaidOut = true
-        setRevealPx(preservedProgress * laidOutDrawerWidthPx)
+        rawRevealPx = preservedRawFraction * laidOutDrawerWidthPx
+        applyProgress()
 
         if (resumeSettling) {
-            startSettle(settlingTarget, 0f)
+            startSettle(resumeVelocity)
         } else if (firstLayout) {
-            open = preservedProgress >= 1f
+            open = preservedRawFraction >= 1f
             targetOpen = open
             lastEmittedOpen = open
             phase = if (open) Phase.Open else Phase.Closed
@@ -160,9 +188,13 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
         if (!gestureEnabled || laidOutDrawerWidthPx <= 0f) return false
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
-                val x = event.x
-                gestureEligible = gestureCanStartAt(x)
-                if (gestureEligible) initializeTouch(event)
+                gestureEligible = true
+                initializeTouch(event)
+                if (phase == Phase.Settling) {
+                    beginDragging(event.x)
+                    parent?.requestDisallowInterceptTouchEvent(true)
+                    return true
+                }
             }
             MotionEvent.ACTION_MOVE -> {
                 if (!gestureEligible) return false
@@ -171,11 +203,10 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
                 val deltaX = event.getX(pointerIndex) - downX
                 val deltaY = event.getY(pointerIndex) - downY
                 val revealDelta = deltaX * revealDirection()
-                val canMove = (revealPx > 0f || revealDelta > 0f) &&
-                    (revealPx < laidOutDrawerWidthPx || revealDelta < 0f)
+                val canMove = (rawRevealPx > 0f || revealDelta > 0f) &&
+                    (rawRevealPx < laidOutDrawerWidthPx || revealDelta < 0f)
                 if (canMove && abs(deltaX) > touchSlop && abs(deltaX) > abs(deltaY)) {
-                    beginDragging()
-                    lastX = event.getX(pointerIndex)
+                    beginDragging(event.getX(pointerIndex))
                     parent?.requestDisallowInterceptTouchEvent(true)
                     return true
                 }
@@ -195,8 +226,7 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
                 if (pointerIndex < 0) return false
                 val x = event.getX(pointerIndex)
                 if (isDragging) {
-                    setRevealPx(revealPx + (x - lastX) * revealDirection())
-                    lastX = x
+                    setDragRawRevealPx(dragStartRawRevealPx + (x - dragStartX) * revealDirection())
                     publishProgress()
                 }
                 return true
@@ -221,19 +251,13 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
     }
 
     override fun computeScroll() {
-        if (phase != Phase.Settling) return
-        if (scroller.computeScrollOffset()) {
-            setRevealPx(scroller.currX.toFloat())
-            publishProgress()
-            postInvalidateOnAnimation()
-            return
-        }
-        finishAtOpen(targetOpen)
+        if (phase != Phase.Settling || !settleRunning) return
+        if (updateSettleFrame(System.nanoTime())) postInvalidateOnAnimation()
     }
 
     override fun onDetachedFromWindow() {
-        if (phase == Phase.Settling) synchronizeScrollerFrame()
-        scroller.abortAnimation()
+        if (phase == Phase.Settling) synchronizeSettleFrame()
+        settleRunning = false
         when (phase) {
             Phase.Dragging -> finishAtOpen(progress() >= 0.5f)
             Phase.Settling -> finishAtOpen(targetOpen)
@@ -252,6 +276,8 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
             is RNSideDrawerPanelView -> panelView = child
             is RNSideDrawerContentView -> {
                 contentView = child
+                child.contentCornerRadiusPx = contentCornerRadiusPx
+                child.setDrawerOverlayColor(overlayColor)
                 child.onScrimPress = { close(true) }
                 child.bringToFront()
             }
@@ -277,6 +303,16 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
         setOpen(true, animated)
     }
 
+    fun setMotionConfig(config: ReadableArray?) {
+        motion = compileMotion(config) ?: arrayOfNulls(MOTION_CHANNEL_COUNT)
+        if (hasLaidOut) applyProgress()
+    }
+
+    fun setOverlayColor(color: Int?) {
+        overlayColor = color ?: Color.TRANSPARENT
+        contentView?.setDrawerOverlayColor(overlayColor)
+    }
+
     fun close(animated: Boolean) {
         setOpen(false, animated)
     }
@@ -287,7 +323,7 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
     }
 
     fun prepareForRemoval() {
-        scroller.abortAnimation()
+        settleRunning = false
         finishTouch()
         contentView?.onScrimPress = null
         slots.clear()
@@ -295,7 +331,7 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
         panelView = null
         contentView = null
         hasLaidOut = false
-        revealPx = 0f
+        rawRevealPx = 0f
         open = false
         targetOpen = false
         phase = Phase.Closed
@@ -312,69 +348,76 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
             emitOpenChangeIfNeeded()
             return
         }
-        if (phase == Phase.Settling) synchronizeScrollerFrame()
+        if (phase == Phase.Settling) synchronizeSettleFrame()
+        val initialVelocity = if (phase == Phase.Settling) settleVelocityPxPerSecond else 0f
+        settleRunning = false
         if (isDragging) finishTouch()
-        settleToOpen(nextOpen, SettlingSource.Programmatic, animated)
+        settleToOpen(nextOpen, SettlingSource.Programmatic, animated, initialVelocity)
     }
 
     private fun settleFromRelease(velocityPxPerSecond: Float) {
-        val resolvedVelocity = velocityPxPerSecond + interruptedRevealVelocityPxPerSecond
-        interruptedRevealVelocityPxPerSecond = 0f
-        val naturalReveal = naturalTargetReveal(revealPx, resolvedVelocity)
-        settleToOpen(naturalReveal >= laidOutDrawerWidthPx * 0.5f, SettlingSource.Release, true, resolvedVelocity)
+        val naturalReveal = naturalTargetReveal(presentedRevealPx(), velocityPxPerSecond)
+        settleToOpen(naturalReveal >= laidOutDrawerWidthPx * 0.5f, SettlingSource.Release, true, velocityPxPerSecond)
     }
 
     private fun settleToOpen(
         nextOpen: Boolean,
         source: SettlingSource,
         animated: Boolean,
-        releaseVelocityPxPerSecond: Float = 0f,
+        initialVelocityPxPerSecond: Float = 0f,
     ) {
         targetOpen = nextOpen
         settlingSource = source
         phase = Phase.Settling
         publishProgress()
-        scroller.abortAnimation()
-        if (!animated || abs(revealPx - targetReveal(nextOpen)) <= 0.5f) {
+        settleRunning = false
+        val atRest = abs(rawRevealPx - targetReveal(nextOpen)) <= SETTLE_POSITION_EPSILON_PX &&
+            abs(initialVelocityPxPerSecond) <= SETTLE_VELOCITY_EPSILON_PX_PER_SECOND
+        if (!animated || atRest) {
             finishAtOpen(nextOpen)
             return
         }
-        startSettle(nextOpen, if (source == SettlingSource.Release) releaseVelocityPxPerSecond else 0f)
+        startSettle(initialVelocityPxPerSecond)
     }
 
-    private fun startSettle(nextOpen: Boolean, velocityPxPerSecond: Float) {
-        val start = revealPx.roundToInt()
-        val end = targetReveal(nextOpen).roundToInt()
-        scroller.abortAnimation()
-        if (!startReleaseFling(start, end, velocityPxPerSecond)) {
-            scroller.startScroll(start, 0, end - start, 0)
-        }
+    private fun startSettle(velocityPxPerSecond: Float) {
+        settleStartRawRevealPx = rawRevealPx
+        settleInitialVelocityPxPerSecond = velocityPxPerSecond
+        settleVelocityPxPerSecond = velocityPxPerSecond
+        settleStartTimeNanos = System.nanoTime()
+        settleRunning = true
         postInvalidateOnAnimation()
     }
 
-    private fun startReleaseFling(start: Int, end: Int, velocityPxPerSecond: Float): Boolean {
-        val distance = end - start
-        if (distance == 0 || velocityPxPerSecond * distance <= 0f) return false
-        scroller.fling(
-            start,
-            0,
-            velocityPxPerSecond.roundToInt(),
-            0,
-            min(start, end),
-            max(start, end),
-            0,
-            0,
-        )
-        if (scroller.finalX == end) return true
-        scroller.abortAnimation()
-        return false
+    private fun updateSettleFrame(frameTimeNanos: Long): Boolean {
+        if (!settleRunning) return false
+        val target = targetReveal(targetOpen)
+        val elapsed = (frameTimeNanos - settleStartTimeNanos).coerceAtLeast(0L) / NANOS_PER_SECOND
+        val initialDisplacement = (settleStartRawRevealPx - target).toDouble()
+        val initialVelocity = settleInitialVelocityPxPerSecond.toDouble()
+        val coefficient = initialVelocity + SETTLE_ANGULAR_FREQUENCY * initialDisplacement
+        val decay = kotlin.math.exp(-SETTLE_ANGULAR_FREQUENCY * elapsed)
+        val displacement = (initialDisplacement + coefficient * elapsed) * decay
+        val velocity = (initialVelocity - SETTLE_ANGULAR_FREQUENCY * coefficient * elapsed) * decay
+
+        val rawReveal = target + displacement.toFloat()
+        rawRevealPx = rawReveal
+        settleVelocityPxPerSecond = velocity.toFloat()
+        applyProgress()
+        publishProgress()
+        if (abs(displacement) <= SETTLE_POSITION_EPSILON_PX && abs(velocity) <= SETTLE_VELOCITY_EPSILON_PX_PER_SECOND) {
+            finishAtOpen(targetOpen)
+            return false
+        }
+        return true
     }
 
     private fun naturalTargetReveal(currentReveal: Float, velocityPxPerSecond: Float): Float {
         val maximum = laidOutDrawerWidthPx.roundToInt()
+        val boundedReveal = currentReveal.coerceIn(0f, laidOutDrawerWidthPx)
         targetResolverScroller.forceFinished(true)
         targetResolverScroller.fling(
-            currentReveal.roundToInt(),
+            boundedReveal.roundToInt(),
             0,
             velocityPxPerSecond.roundToInt(),
             0,
@@ -387,13 +430,13 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
     }
 
     private fun finishAtOpen(nextOpen: Boolean) {
-        scroller.abortAnimation()
-        revealPx = targetReveal(nextOpen)
+        settleRunning = false
+        settleVelocityPxPerSecond = 0f
+        rawRevealPx = targetReveal(nextOpen)
         open = nextOpen
         targetOpen = nextOpen
         phase = if (nextOpen) Phase.Open else Phase.Closed
         settlingSource = SettlingSource.None
-        interruptedRevealVelocityPxPerSecond = 0f
         applyProgress()
         publishProgress()
         emitOpenChangeIfNeeded()
@@ -405,23 +448,19 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
         activePointerId = event.getPointerId(0)
         downX = event.x
         downY = event.y
-        lastX = downX
         isDragging = false
     }
 
-    private fun beginDragging() {
+    private fun beginDragging(currentX: Float) {
         if (isDragging) return
-        val interruptedTarget = if (phase == Phase.Settling) targetOpen else open
-        if (phase == Phase.Settling) synchronizeScrollerFrame()
-        val interruptedVelocity = if (phase == Phase.Settling && !scroller.isFinished) {
-            currentScrollerVelocityPxPerSecond()
-        } else {
-            0f
-        }
-        scroller.abortAnimation()
+        val wasSettling = phase == Phase.Settling
+        val interruptedTarget = if (wasSettling) targetOpen else open
+        if (wasSettling) synchronizeSettleFrame()
+        settleRunning = false
         isDragging = true
+        dragStartX = if (wasSettling) currentX else downX
+        dragStartRawRevealPx = rawRevealPx
         targetOpen = interruptedTarget
-        interruptedRevealVelocityPxPerSecond = interruptedVelocity
         settlingSource = SettlingSource.None
         phase = Phase.Dragging
         publishProgress()
@@ -440,35 +479,15 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
         if (event.getPointerId(actionIndex) != activePointerId) return
         val nextIndex = if (actionIndex == 0) 1 else 0
         activePointerId = event.getPointerId(nextIndex)
-        lastX = event.getX(nextIndex)
-        downX = lastX
+        dragStartX = event.getX(nextIndex)
+        dragStartRawRevealPx = rawRevealPx
+        downX = dragStartX
         downY = event.getY(nextIndex)
         velocityTracker?.clear()
     }
 
-    private fun synchronizeScrollerFrame() {
-        if (!scroller.computeScrollOffset()) return
-        setRevealPx(scroller.currX.toFloat())
-        publishProgress()
-    }
-
-    private fun currentScrollerVelocityPxPerSecond(): Float {
-        val remaining = targetReveal(targetOpen) - revealPx
-        if (remaining == 0f) return 0f
-        return scroller.currVelocity * if (remaining > 0f) 1f else -1f
-    }
-
-    private fun gestureCanStartAt(x: Float): Boolean {
-        val currentProgress = progress()
-        if (currentProgress <= 0.001f) {
-            return if (revealDirection() > 0) x <= edgeWidthPx else x >= width - edgeWidthPx
-        }
-        return pointIsOnContent(x, currentProgress)
-    }
-
-    private fun pointIsOnContent(x: Float, currentProgress: Float): Boolean {
-        val revealed = currentProgress * laidOutDrawerWidthPx
-        return if (revealDirection() > 0) x >= revealed else x <= width - revealed
+    private fun synchronizeSettleFrame() {
+        if (settleRunning) updateSettleFrame(System.nanoTime())
     }
 
     private fun revealDirection(): Int {
@@ -477,34 +496,144 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
         return if (revealsLeft) 1 else -1
     }
 
-    private fun setRevealPx(value: Float) {
-        revealPx = value.coerceIn(0f, laidOutDrawerWidthPx)
+    private fun setDragRawRevealPx(value: Float) {
+        rawRevealPx = value
         applyProgress()
     }
 
+    private fun presentedRevealPx(): Float {
+        val maximum = laidOutDrawerWidthPx
+        return when {
+            rawRevealPx < 0f -> -rubberBandDistance(-rawRevealPx)
+            rawRevealPx > maximum -> maximum + rubberBandDistance(rawRevealPx - maximum)
+            else -> rawRevealPx
+        }
+    }
+
+    private fun rubberBandDistance(distance: Float): Float {
+        val dimension = width.toFloat().coerceAtLeast(1f)
+        return distance * dimension * RUBBER_BAND_COEFFICIENT /
+            (dimension + RUBBER_BAND_COEFFICIENT * distance)
+    }
+
+    private fun compileMotion(config: ReadableArray?): Array<MotionInterpolation?>? {
+        if (config == null || config.size() < MOTION_CHANNEL_COUNT) return null
+        val compiled = arrayOfNulls<MotionInterpolation>(MOTION_CHANNEL_COUNT)
+        var cursor = MOTION_CHANNEL_COUNT
+        for (channel in 0 until MOTION_CHANNEL_COUNT) {
+            val rawPointCount = config.getDouble(channel)
+            val pointCount = rawPointCount.toInt()
+            if (!rawPointCount.isFinite() || rawPointCount != pointCount.toDouble() || pointCount < 0 || pointCount == 1) {
+                return null
+            }
+            if (cursor + pointCount * 2 > config.size()) return null
+            if (pointCount == 0) continue
+
+            val outputScale = if (
+                channel == DRAWER_TRANSLATE_X || channel == DRAWER_TRANSLATE_Y ||
+                channel == CONTENT_TRANSLATE_X || channel == CONTENT_TRANSLATE_Y
+            ) {
+                resources.displayMetrics.density
+            } else {
+                1f
+            }
+            val firstInput = config.getDouble(cursor).toFloat()
+            val firstOutput = config.getDouble(cursor + 1).toFloat() * outputScale
+            if (!firstInput.isFinite() || !firstOutput.isFinite() || firstInput !in 0f..1f) return null
+            var previousInput = firstInput
+            var previousOutput = firstOutput
+            var lastInput = firstInput
+            var lastOutput = firstOutput
+            cursor += 2
+            val segments = ArrayList<MotionSegment>(pointCount - 1)
+            repeat(pointCount - 1) {
+                val input = config.getDouble(cursor).toFloat()
+                val output = config.getDouble(cursor + 1).toFloat() * outputScale
+                if (!input.isFinite() || !output.isFinite() || input <= previousInput || input > 1f) return null
+                val slope = (output - previousOutput) / (input - previousInput)
+                segments.add(MotionSegment(input, slope, previousOutput - slope * previousInput))
+                previousInput = input
+                previousOutput = output
+                lastInput = input
+                lastOutput = output
+                cursor += 2
+            }
+            compiled[channel] = MotionInterpolation(
+                firstInput,
+                firstOutput,
+                lastInput,
+                lastOutput,
+                segments.toTypedArray(),
+            )
+        }
+        return if (cursor == config.size()) compiled else null
+    }
+
+    private fun motionValue(channel: Int, progress: Float, fallback: Float): Float {
+        return motion[channel]?.evaluate(progress) ?: fallback
+    }
+
     private fun applyProgress() {
-        val currentProgress = progress()
-        contentView?.translationX = revealDirection() * revealPx
-        contentView?.setDrawerProgress(currentProgress)
-        panelView?.isEnabled = currentProgress > 0.001f
+        val presentedReveal = presentedRevealPx()
+        val currentProgress = if (laidOutDrawerWidthPx > 0f) {
+            (presentedReveal / laidOutDrawerWidthPx).coerceIn(0f, 1f)
+        } else {
+            0f
+        }
+        val panel = panelView
+        val drawerOpacity = motionValue(DRAWER_OPACITY, currentProgress, 1f).coerceIn(0f, 1f)
+        val drawerScale = motionValue(DRAWER_SCALE, currentProgress, 1f)
+        val drawerTranslationX = motionValue(DRAWER_TRANSLATE_X, currentProgress, 0f)
+        val drawerTranslationY = motionValue(DRAWER_TRANSLATE_Y, currentProgress, 0f)
+        if (panel != null) {
+            if (panel.alpha != drawerOpacity) panel.alpha = drawerOpacity
+            if (panel.scaleX != drawerScale) panel.scaleX = drawerScale
+            if (panel.scaleY != drawerScale) panel.scaleY = drawerScale
+            if (panel.translationX != drawerTranslationX) panel.translationX = drawerTranslationX
+            if (panel.translationY != drawerTranslationY) panel.translationY = drawerTranslationY
+        }
+
+        val content = contentView
+        val contentOpacity = motionValue(CONTENT_OPACITY, currentProgress, 1f).coerceIn(0f, 1f)
+        val contentScale = motionValue(CONTENT_SCALE, currentProgress, 1f)
+        val contentTranslationX =
+            revealDirection() * presentedReveal + motionValue(CONTENT_TRANSLATE_X, currentProgress, 0f)
+        val contentTranslationY = motionValue(CONTENT_TRANSLATE_Y, currentProgress, 0f)
+        if (content != null) {
+            if (content.alpha != contentOpacity) content.alpha = contentOpacity
+            if (content.scaleX != contentScale) content.scaleX = contentScale
+            if (content.scaleY != contentScale) content.scaleY = contentScale
+            if (content.translationX != contentTranslationX) content.translationX = contentTranslationX
+            if (content.translationY != contentTranslationY) content.translationY = contentTranslationY
+            content.setDrawerOverlayOpacity(motionValue(OVERLAY_OPACITY, currentProgress, 0f))
+            content.setDrawerProgress(currentProgress)
+        }
+        val panelEnabled = currentProgress > 0.001f
+        if (panelView?.isEnabled != panelEnabled) panelView?.isEnabled = panelEnabled
         when {
             currentProgress <= 0.001f -> {
-                panelView?.importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
-                contentView?.importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_AUTO
+                setAccessibilityState(IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS, IMPORTANT_FOR_ACCESSIBILITY_AUTO)
             }
             currentProgress >= 0.999f -> {
-                panelView?.importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_AUTO
-                contentView?.importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+                setAccessibilityState(IMPORTANT_FOR_ACCESSIBILITY_AUTO, IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS)
             }
             else -> {
-                panelView?.importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_AUTO
-                contentView?.importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_AUTO
+                setAccessibilityState(IMPORTANT_FOR_ACCESSIBILITY_AUTO, IMPORTANT_FOR_ACCESSIBILITY_AUTO)
             }
         }
     }
 
+    private fun setAccessibilityState(panelState: Int, contentState: Int) {
+        if (panelView?.importantForAccessibility != panelState) panelView?.importantForAccessibility = panelState
+        if (contentView?.importantForAccessibility != contentState) contentView?.importantForAccessibility = contentState
+    }
+
     private fun progress(): Float {
-        return if (laidOutDrawerWidthPx > 0f) (revealPx / laidOutDrawerWidthPx).coerceIn(0f, 1f) else 0f
+        return if (laidOutDrawerWidthPx > 0f) {
+            (presentedRevealPx() / laidOutDrawerWidthPx).coerceIn(0f, 1f)
+        } else {
+            0f
+        }
     }
 
     private fun targetReveal(nextOpen: Boolean): Float = if (nextOpen) laidOutDrawerWidthPx else 0f
@@ -560,6 +689,22 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
     }
 
     private companion object {
+        const val DRAWER_OPACITY = 0
+        const val DRAWER_SCALE = 1
+        const val DRAWER_TRANSLATE_X = 2
+        const val DRAWER_TRANSLATE_Y = 3
+        const val CONTENT_OPACITY = 4
+        const val CONTENT_SCALE = 5
+        const val CONTENT_TRANSLATE_X = 6
+        const val CONTENT_TRANSLATE_Y = 7
+        const val OVERLAY_OPACITY = 8
+        const val MOTION_CHANNEL_COUNT = 9
         const val INVALID_POINTER_ID = -1
+        // UIKit's rubber-band relation uses this coefficient for immediate, continuous endpoint resistance.
+        const val RUBBER_BAND_COEFFICIENT = 0.55f
+        const val NANOS_PER_SECOND = 1_000_000_000.0
+        const val SETTLE_ANGULAR_FREQUENCY = 12.566370614359172
+        const val SETTLE_POSITION_EPSILON_PX = 0.5
+        const val SETTLE_VELOCITY_EPSILON_PX_PER_SECOND = 5.0
     }
 }

@@ -1,5 +1,6 @@
 import * as React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Pager, type PagerRef } from 'react-native-pager-drawer';
 
 const PAGES = [
@@ -8,8 +9,9 @@ const PAGES = [
   { color: '#FFE2C5', eyebrow: 'Platform motion', title: 'No JS frame loop' },
 ] as const;
 
-export function PagerExample(): React.JSX.Element {
+export function PagerExample({ navigation }: { navigation: React.ReactNode }): React.JSX.Element {
   const pagerRef = React.useRef<PagerRef>(null);
+  const insets = useSafeAreaInsets();
   const [page, setPage] = React.useState(1);
 
   const showPage = React.useCallback((nextPage: number) => {
@@ -18,6 +20,7 @@ export function PagerExample(): React.JSX.Element {
 
   return (
     <View style={styles.root}>
+      <View style={[styles.navigation, { paddingTop: insets.top + 14 }]}>{navigation}</View>
       <View style={styles.header}>
         <Text style={styles.kicker}>REACT NATIVE PAGER DRAWER</Text>
         <Text style={styles.heading}>Native pager</Text>
@@ -43,7 +46,7 @@ export function PagerExample(): React.JSX.Element {
         ))}
       </Pager>
 
-      <View style={styles.controls}>
+      <View style={[styles.controls, { paddingBottom: Math.max(20, insets.bottom + 8) }]}>
         <Pressable disabled={page === 0} onPress={() => showPage(page - 1)} style={styles.button}>
           <Text style={[styles.buttonText, page === 0 && styles.disabled]}>Previous</Text>
         </Pressable>
@@ -72,7 +75,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     flexDirection: 'row',
     justifyContent: 'space-between',
-    paddingBottom: 32,
     paddingHorizontal: 20,
   },
   detail: {
@@ -94,7 +96,7 @@ const styles = StyleSheet.create({
   },
   header: {
     paddingHorizontal: 20,
-    paddingTop: 72,
+    paddingTop: 52,
   },
   heading: {
     color: '#F5F7FA',
@@ -108,6 +110,10 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '800',
     letterSpacing: 1.4,
+  },
+  navigation: {
+    paddingBottom: 10,
+    paddingHorizontal: 12,
   },
   page: {
     borderRadius: 28,

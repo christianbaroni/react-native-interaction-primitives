@@ -74,7 +74,7 @@ The target must be an integer within the currently mounted page range. Invalid t
 
 ## Side drawer
 
-`SideDrawer` keeps its drawer slot fixed underneath one moving application surface. A closed gesture begins only inside `edgeWidth`; once revealed, horizontal gestures and taps belong to the moving content while the exposed drawer remains interactive.
+`SideDrawer` keeps its drawer slot fixed underneath one moving application surface. Directionally valid horizontal gestures can open or close it from anywhere in the component while taps and cross-axis gestures remain with the touched content.
 
 ```tsx
 import * as React from 'react';
@@ -92,6 +92,17 @@ export function Shell() {
         </View>
       }
       drawerWidth={300}
+      motion={{
+        drawer: {
+          opacity: { inputRange: [0, 0.9], outputRange: [0.1, 1] },
+          scale: { inputRange: [0, 0.9], outputRange: [0.94, 1] },
+          translateX: { inputRange: [0, 1], outputRange: [-16, 0] },
+        },
+        overlay: {
+          color: 'black',
+          opacity: { inputRange: [0, 1], outputRange: [0, 0.4] },
+        },
+      }}
       ref={drawer}
       style={{ flex: 1 }}
     >
@@ -109,19 +120,28 @@ The ref exposes `open`, `close`, and `toggle`; each accepts `{ animated?: boolea
 
 - `drawer: ReactElement` — the fixed underlay content.
 - `children: ReactElement` — the application surface that moves over the drawer.
+- `contentCornerRadius?: number` — defaults to the native screen radius; set `0` to disable clipping. iOS uses a continuous corner curve.
 - `drawerWidth: number` — required reveal distance and drawer layout width.
-- `edgeWidth?: number` — closed-state gesture region; defaults to `24`.
 - `gestureEnabled?: boolean` — enables native drag gestures; commands and tap-to-close remain available.
 - `initialOpen?: boolean` — selects the initial native endpoint without creating a controlled state loop.
+- `motion?: SideDrawerMotion` — declarative native interpolation for drawer/content opacity, uniform scale, `translateX`, `translateY`, and overlay color/opacity.
 - `side?: 'start' | 'end'` — logical drawer side, resolved through native layout direction.
 - `onOpenChange?: (open) => void` — reports a completed endpoint change.
 - `onProgress?: (event) => void` — reports normalized progress and native phase. Both platforms skip payload construction when this observer is absent.
 
+The default iOS screen radius reads the private `UIScreen` display-corner property and falls back to `0` if it is unavailable. Pass an explicit `contentCornerRadius` to avoid that private lookup when App Store policy is a concern. Android uses `WindowInsets.getRoundedCorner` on Android 12 and later and otherwise falls back to `0` unless an override is supplied.
+
 `onProgress` reports `progress` in `[0, 1]`, `phase`, `targetOpen`, and the `release`, `programmatic`, or `none` settling source. It is observational; writing the event back into layout is not part of the component contract.
+
+Each motion channel has matching `inputRange` and `outputRange` arrays with at least two points. Inputs must be finite, strictly increasing, and within `[0, 1]`; outputs must be finite. Native evaluation clamps before the first input and after the last. Translation outputs use React Native layout units: points on iOS and density-independent pixels on Android.
+
+Drawer transforms are applied to a full-screen native underlay host, so scale and translation keep a stable screen-relative origin throughout reveal. `drawerWidth` still owns both reveal distance and the caller drawer content's layout width.
+
+The motion description is validated and flattened once per `motion` object, then compiled into native line segments when that prop changes. Native progress evaluates those segments directly on every display frame. It does not schedule React renders, JavaScript callbacks, Reanimated worklets, layout passes, or frame-time allocations. Overlay color is constant for a motion description; its opacity is interpolated.
 
 ## Reanimated observation
 
-Reanimated is optional and lives behind the `react-native-pager-drawer/reanimated` entry point. The hook updates shared values from the pager's direct native scroll event. It does not schedule or advance the pager animation.
+Reanimated is optional and lives behind the `react-native-pager-drawer/reanimated` entry point. The hooks update shared values from direct native progress events. They do not schedule or advance native animation.
 
 ```tsx
 import Animated from 'react-native-reanimated';
@@ -143,9 +163,33 @@ function Deck() {
 
 The controller exposes `offset`, `page`, `phase`, and `position` shared values, plus the ordinary `setPage` command and pager ref.
 
+`useSideDrawer` follows the same observation-only contract:
+
+```tsx
+import Animated from 'react-native-reanimated';
+import { SideDrawer } from 'react-native-pager-drawer';
+import { useSideDrawer } from 'react-native-pager-drawer/reanimated';
+
+const AnimatedSideDrawer = Animated.createAnimatedComponent(SideDrawer);
+
+function Shell() {
+  const drawer = useSideDrawer();
+
+  return (
+    <AnimatedSideDrawer drawer={/* drawer content */} drawerWidth={300} onProgress={drawer.onProgress} ref={drawer.ref}>
+      {/* application content */}
+    </AnimatedSideDrawer>
+  );
+}
+```
+
+The controller exposes `progress`, `phase`, `settlingSource`, and `targetOpen` shared values, plus ordinary `open`, `close`, and `toggle` commands and the drawer ref. Use the `motion` prop for visuals that must remain native even when no observer is attached.
+
 ## Motion ownership
 
-On iOS, `UIScrollView` handles direct manipulation and `UIViewPropertyAnimator` handles interrupted release snaps. On Android, touch arbitration, `VelocityTracker`, and `OverScroller` own the equivalent path. Neither implementation waits on JavaScript or Reanimated to produce a frame.
+On iOS, `UIScrollView` owns direct manipulation and rubber-banding, while one display-linked critical spring owns release and programmatic settling from the exact physical position and velocity. On Android, parent touch arbitration and `VelocityTracker` own direct manipulation, `OverScroller` projects release intent, and a native analytic spring owns settling. Neither implementation waits on JavaScript or Reanimated to produce a frame.
+
+For 120 Hz updates on supported iPhones, the host application must set `CADisableMinimumFrameDurationOnPhone` to `true`. The native components follow the display's actual cadence and do not hard-code a refresh rate.
 
 ## License
 
