@@ -127,6 +127,7 @@ using RNSideDrawerMotion = std::array<RNSideDrawerInterpolation, RNSideDrawerMot
 @implementation RNSideDrawerView {
   RNSideDrawerScrollView *_scrollView;
   UIView *_contactBackingView;
+  UIView *_contentHostView;
   NSMutableArray<UIView *> *_slots;
   UIView<RNSideDrawerPanelSlot> *_panelView;
   UIView<RNSideDrawerContentSlot> *_contentView;
@@ -319,6 +320,12 @@ static RNSideDrawerMotion RNSideDrawerCompileMotion(NSArray<NSNumber *> *config)
     _contactBackingView.backgroundColor = UIColor.clearColor;
     _contactBackingView.isAccessibilityElement = NO;
     [_scrollView addSubview:_contactBackingView];
+
+    _contentHostView = [[UIView alloc] initWithFrame:self.bounds];
+    _contentHostView.backgroundColor = UIColor.clearColor;
+    _contentHostView.clipsToBounds = YES;
+    _contentHostView.isAccessibilityElement = NO;
+    [_scrollView addSubview:_contentHostView];
   }
   return self;
 }
@@ -348,7 +355,8 @@ static RNSideDrawerMotion RNSideDrawerCompileMotion(NSArray<NSNumber *> *config)
   CGFloat height = self.bounds.size.height;
   _contactBackingView.bounds = CGRectMake(0, 0, width, height);
   _panelView.bounds = CGRectMake(0, 0, width, height);
-  _contentView.bounds = CGRectMake(0, 0, width, height);
+  _contentHostView.bounds = CGRectMake(0, 0, width, height);
+  _contentView.frame = _contentHostView.bounds;
   if (firstLayout) {
     _reveal = _initialOpen ? _laidOutDrawerWidth : 0;
   } else if (previousReveal < 0) {
@@ -497,7 +505,8 @@ static RNSideDrawerMotion RNSideDrawerCompileMotion(NSArray<NSNumber *> *config)
     _contentView.onScrimPress = ^{
       [weakSelf closeAnimated:YES];
     };
-    [_scrollView addSubview:slot];
+    slot.frame = _contentHostView.bounds;
+    [_contentHostView addSubview:slot];
     [_contentView setDrawerOverlayColor:_overlayColor];
     [self applyContentCorners];
   }
@@ -852,7 +861,7 @@ static RNSideDrawerMotion RNSideDrawerCompileMotion(NSArray<NSNumber *> *config)
 
 - (CGFloat)presentationReveal
 {
-  CALayer *layer = _contentView.layer.presentationLayer ?: _contentView.layer;
+  CALayer *layer = _contentHostView.layer.presentationLayer ?: _contentHostView.layer;
   CGFloat viewportCenter = [self currentPhysicalOffset] + self.bounds.size.width * 0.5;
   return (layer.position.x - viewportCenter) * _revealDirection;
 }
@@ -926,9 +935,8 @@ static RNSideDrawerMotion RNSideDrawerCompileMotion(NSArray<NSNumber *> *config)
 
 - (CGFloat)revealFromContentCenter
 {
-  if (_contentView == nil) return _reveal;
   CGFloat viewportCenter = [self currentPhysicalOffset] + self.bounds.size.width * 0.5;
-  return (_contentView.center.x - viewportCenter) * _revealDirection;
+  return (_contentHostView.center.x - viewportCenter) * _revealDirection;
 }
 
 - (void)setProgress:(CGFloat)progress
@@ -967,7 +975,7 @@ static RNSideDrawerMotion RNSideDrawerCompileMotion(NSArray<NSNumber *> *config)
   CGPoint center = CGPointMake(
       [self currentPhysicalOffset] + self.bounds.size.width * 0.5,
       self.bounds.size.height * 0.5);
-  if (_contentView != nil) _contentView.center = CGPointMake(center.x + _revealDirection * reveal, center.y);
+  _contentHostView.center = CGPointMake(center.x + _revealDirection * reveal, center.y);
 }
 
 - (void)applyMotionProgress:(CGFloat)progress
@@ -989,9 +997,9 @@ static RNSideDrawerMotion RNSideDrawerCompileMotion(NSArray<NSNumber *> *config)
   CGFloat boundedContentOpacity = RNSideDrawerClamp(contentOpacity, 0, 1);
   CGAffineTransform contentTransform =
       CGAffineTransformMake(contentScale, 0, 0, contentScale, contentTranslateX, contentTranslateY);
-  if (_contentView.alpha != boundedContentOpacity) _contentView.alpha = boundedContentOpacity;
-  if (!CGAffineTransformEqualToTransform(_contentView.transform, contentTransform)) {
-    _contentView.transform = contentTransform;
+  if (_contentHostView.alpha != boundedContentOpacity) _contentHostView.alpha = boundedContentOpacity;
+  if (!CGAffineTransformEqualToTransform(_contentHostView.transform, contentTransform)) {
+    _contentHostView.transform = contentTransform;
   }
   [_contentView setDrawerOverlayOpacity:_motion[RNSideDrawerMotionOverlayOpacity].evaluate(progress, 0)];
 }
@@ -1006,12 +1014,11 @@ static RNSideDrawerMotion RNSideDrawerCompileMotion(NSArray<NSNumber *> *config)
 
 - (void)applyContentCorners
 {
-  if (_contentView == nil) return;
   UIScreen *screen = self.window.screen ?: UIScreen.mainScreen;
   CGFloat radius = _contentCornerRadius >= 0 ? _contentCornerRadius : RNSideDrawerScreenCornerRadius(screen);
-  _contentView.layer.cornerCurve = kCACornerCurveContinuous;
-  _contentView.layer.cornerRadius = radius;
-  _contentView.layer.masksToBounds = radius > 0;
+  _contentHostView.layer.cornerCurve = kCACornerCurveContinuous;
+  _contentHostView.layer.cornerRadius = radius;
+  _contentHostView.layer.masksToBounds = radius > 0;
 }
 
 - (void)advanceSettleToTime:(CFTimeInterval)time
