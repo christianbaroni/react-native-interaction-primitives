@@ -200,9 +200,11 @@ The controller exposes `progress`, `phase`, `settlingSource`, and `targetOpen` s
 
 ## Motion ownership
 
-On iOS, `UIScrollView` owns direct manipulation and rubber-banding, while one display-linked critical spring owns release and programmatic settling from the exact physical position and velocity. On Android, parent touch arbitration and `VelocityTracker` own direct manipulation, `OverScroller` projects release intent, and a native analytic spring owns settling. Neither implementation waits on JavaScript or Reanimated to produce a frame.
+On iOS, `UIScrollView` owns full-surface touch arbitration, but its content offset and bounce physics do not own visible drawer motion. On Android, the native parent owns the equivalent directional interception. Both platforms move the content from one canonical reveal position, project release intent with native velocity, and evaluate the same allocation-free critical response from that visible motion state. Direct open-end resistance and release overtravel share a four-point/dp physical cap; ordinary releases stop at the endpoint, while only a hard fling carries enough admitted energy to produce the small excursion. Closed-state gestures cannot move the content past closed.
 
-For 120 Hz updates on supported iPhones, the host application must set `CADisableMinimumFrameDurationOnPhone` to `true`. The native components follow the display's actual cadence and do not hard-code a refresh rate.
+iOS settles from `CADisplayLink.targetTimestamp` and requests the highest supported cadence while motion is active, using Apple's 80–120 Hz high-impact range on ProMotion displays. Android advances from `Choreographer.FrameCallback.frameTimeNanos` and requests the high frame-rate category on Android 15 and later. Neither implementation waits on JavaScript or Reanimated to produce a frame.
+
+For 120 Hz updates on supported iPhones, the host application must set `CADisableMinimumFrameDurationOnPhone` to `true`. Actual refresh cadence remains subject to the display, host configuration, Low Power Mode, and system thermal policy.
 
 ## License
 

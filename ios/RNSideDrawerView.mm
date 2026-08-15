@@ -8,6 +8,7 @@
 #import <React/UIView+React.h>
 #import <QuartzCore/QuartzCore.h>
 #include <array>
+#include <float.h>
 #import <math.h>
 #include <vector>
 
@@ -92,17 +93,24 @@ using RNSideDrawerMotion = std::array<RNSideDrawerInterpolation, RNSideDrawerMot
 - (void)applyProgress:(CGFloat)progress;
 - (void)applyContentCorners;
 - (void)advanceSettleToTime:(CFTimeInterval)time;
+- (void)commitReleaseWithRevealVelocity:(CGFloat)revealVelocity;
+- (CGFloat)directRawRevealForPresentation:(CGFloat)reveal;
+- (CGFloat)directRevealForRawReveal:(CGFloat)reveal;
+- (CGFloat)directVelocityScaleForRawReveal:(CGFloat)reveal;
 - (void)finishAtOpen:(BOOL)open;
 - (void)handleContactBegin;
-- (CGFloat)physicalOffsetForRawReveal:(CGFloat)reveal;
 - (void)pauseActiveSettle;
-- (BOOL)prepareSettleToOpen:(BOOL)open reveal:(CGFloat)reveal velocity:(CGFloat)velocity;
+- (BOOL)prepareSettleToOpen:(BOOL)open
+                    reveal:(CGFloat)reveal
+                  velocity:(CGFloat)velocity
+          allowsOvertravel:(BOOL)allowsOvertravel;
 - (CGFloat)progress;
-- (CGFloat)rawRevealForPhysicalOffset:(CGFloat)offset;
 - (void)setPhysicalOffset:(CGFloat)offset allowingBounce:(BOOL)allowingBounce;
 - (void)setOpen:(BOOL)open animated:(BOOL)animated source:(RNSideDrawerSettlingSource)source;
 - (BOOL)shouldBeginPanWithVelocity:(CGPoint)velocity;
-- (void)startSettleToOpen:(BOOL)open revealVelocity:(CGFloat)revealVelocity;
+- (void)startSettleToOpen:(BOOL)open
+           revealVelocity:(CGFloat)revealVelocity
+         allowsOvertravel:(BOOL)allowsOvertravel;
 - (void)startSettleDisplayLink;
 - (void)stopScrollMotionAtOffset:(CGFloat)offset;
 - (CGFloat)stopSettleAtCurrentPosition;
@@ -125,13 +133,21 @@ using RNSideDrawerMotion = std::array<RNSideDrawerInterpolation, RNSideDrawerMot
   BOOL _hasLaidOut;
   BOOL _gestureHapticTriggered;
   BOOL _gestureOriginOpen;
+  BOOL _gestureReachedPositiveReveal;
+  BOOL _dragHasReachedNonnegative;
+  BOOL _settleAllowsOvertravel;
   BOOL _open;
   BOOL _targetOpen;
   BOOL _lastEmittedOpen;
   NSInteger _revealDirection;
   CGFloat _laidOutDrawerWidth;
+  CGFloat _reveal;
   CGFloat _releaseRevealVelocity;
-  CGFloat _settleReveal;
+  CGFloat _dragRawReveal;
+  CGFloat _dragStartRawReveal;
+  CGFloat _dragStartTranslation;
+  CGFloat _dragLowerBound;
+  CGFloat _settleAngularFrequency;
   CGFloat _settleVelocity;
   CFTimeInterval _lastSettleTime;
   RNSideDrawerMotion _motion;
@@ -140,6 +156,9 @@ using RNSideDrawerMotion = std::array<RNSideDrawerInterpolation, RNSideDrawerMot
 static const CGFloat RNSideDrawerMillisecondsPerSecond = 1000.0;
 static const CGFloat RNSideDrawerSettleAngularFrequency = 4 * M_PI;
 static const CGFloat RNSideDrawerSettleVelocityTolerance = 5;
+static const CGFloat RNSideDrawerOvertravelLimit = 4;
+// A release earns bounce only if its unrestricted critical trajectory carries six times the visible budget.
+static const CGFloat RNSideDrawerOvertravelAdmissionExcursion = 24;
 
 static CGFloat RNSideDrawerClamp(CGFloat value, CGFloat minimum, CGFloat maximum)
 {
@@ -151,6 +170,50 @@ static CGFloat RNSideDrawerProjectOffset(CGFloat offset, CGFloat velocity, CGFlo
   if (!isfinite(velocity)) return offset;
   CGFloat rate = isfinite(decelerationRate) ? RNSideDrawerClamp(decelerationRate, 0, 0.999999) : UIScrollViewDecelerationRateNormal;
   return offset + velocity * rate / (1 - rate);
+}
+
+static CGFloat RNSideDrawerOutwardExcursion(
+    CGFloat reveal, CGFloat velocity, CGFloat target, CGFloat angularFrequency)
+{
+  CGFloat outwardDirection = target > 0 ? 1 : -1;
+  CGFloat displacement = reveal - target;
+  CGFloat maximumExcursion = MAX(0, outwardDirection * displacement);
+  CGFloat coefficient = velocity + angularFrequency * displacement;
+  if (fabs(coefficient) <= DBL_EPSILON) return maximumExcursion;
+
+  CGFloat extremumTime = velocity / (angularFrequency * coefficient);
+  if (extremumTime <= 0 || !isfinite(extremumTime)) return maximumExcursion;
+  CGFloat extremumDisplacement =
+      (displacement + coefficient * extremumTime) * exp(-angularFrequency * extremumTime);
+  return MAX(maximumExcursion, outwardDirection * extremumDisplacement);
+}
+
+static CGFloat RNSideDrawerSettleFrequency(
+    CGFloat reveal, CGFloat velocity, CGFloat target, CGFloat allowedExcursion)
+{
+  CGFloat baseFrequency = RNSideDrawerSettleAngularFrequency;
+  CGFloat outwardDirection = target > 0 ? 1 : -1;
+  CGFloat currentExcursion = MAX(0, outwardDirection * (reveal - target));
+  allowedExcursion = MAX(allowedExcursion, currentExcursion);
+  CGFloat baseExcursion = RNSideDrawerOutwardExcursion(reveal, velocity, target, baseFrequency);
+  if (baseExcursion <= allowedExcursion) return baseFrequency;
+
+  CGFloat lowerFrequency = baseFrequency;
+  CGFloat upperFrequency = baseFrequency * 2;
+  while (RNSideDrawerOutwardExcursion(reveal, velocity, target, upperFrequency) > allowedExcursion &&
+         upperFrequency < 1e6) {
+    lowerFrequency = upperFrequency;
+    upperFrequency *= 2;
+  }
+  for (NSUInteger iteration = 0; iteration < 32; iteration += 1) {
+    CGFloat candidate = (lowerFrequency + upperFrequency) * 0.5;
+    if (RNSideDrawerOutwardExcursion(reveal, velocity, target, candidate) > allowedExcursion) {
+      lowerFrequency = candidate;
+    } else {
+      upperFrequency = candidate;
+    }
+  }
+  return upperFrequency;
 }
 
 static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
@@ -228,6 +291,7 @@ static RNSideDrawerMotion RNSideDrawerCompileMotion(NSArray<NSNumber *> *config)
     _phase = RNSideDrawerPhaseClosed;
     _settlingSource = RNSideDrawerSettlingSourceNone;
     _revealDirection = 1;
+    _settleAngularFrequency = RNSideDrawerSettleAngularFrequency;
     _slots = [NSMutableArray arrayWithCapacity:2];
 
     _scrollView = [[RNSideDrawerScrollView alloc] initWithFrame:self.bounds];
@@ -273,10 +337,10 @@ static RNSideDrawerMotion RNSideDrawerCompileMotion(NSArray<NSNumber *> *config)
   BOOL firstLayout = !_hasLaidOut;
   BOOL resumeSettling = _phase == RNSideDrawerPhaseSettling;
   BOOL targetOpen = _targetOpen;
+  BOOL resumeAllowsOvertravel = _settleAllowsOvertravel;
   CGFloat resumeVelocity = resumeSettling ? [self stopSettleAtCurrentPosition] : 0;
-  CGFloat preservedProgress = firstLayout
-      ? (_initialOpen ? 1 : 0)
-      : [self rawProgressForOffset:[self currentPhysicalOffset] width:_laidOutDrawerWidth direction:_revealDirection];
+  CGFloat previousDrawerWidth = _laidOutDrawerWidth;
+  CGFloat previousReveal = _reveal;
 
   _revealDirection = [self resolvedRevealDirection];
   _laidOutDrawerWidth = MAX(0, _drawerWidth);
@@ -287,24 +351,34 @@ static RNSideDrawerMotion RNSideDrawerCompileMotion(NSArray<NSNumber *> *config)
   _contactBackingView.bounds = CGRectMake(0, 0, width, height);
   _panelView.bounds = CGRectMake(0, 0, width, height);
   _contentView.bounds = CGRectMake(0, 0, width, height);
-  if (_revealDirection > 0) {
-    _contentView.center = CGPointMake(_laidOutDrawerWidth + width * 0.5, height * 0.5);
+  if (firstLayout) {
+    _reveal = _initialOpen ? _laidOutDrawerWidth : 0;
+  } else if (previousReveal < 0) {
+    _reveal = previousReveal;
+  } else if (previousReveal > previousDrawerWidth) {
+    _reveal = _laidOutDrawerWidth + previousReveal - previousDrawerWidth;
+  } else if (previousDrawerWidth > 0) {
+    _reveal = previousReveal / previousDrawerWidth * _laidOutDrawerWidth;
   } else {
-    _contentView.center = CGPointMake(width * 0.5, height * 0.5);
+    _reveal = _open ? _laidOutDrawerWidth : 0;
   }
   _scrollView.contentSize = CGSizeMake(width + _laidOutDrawerWidth, height);
   _hasLaidOut = YES;
-  CGFloat preservedOffset = _revealDirection > 0
-      ? (1 - preservedProgress) * _laidOutDrawerWidth
-      : preservedProgress * _laidOutDrawerWidth;
-  [self setPhysicalOffset:preservedOffset allowingBounce:YES];
-  [self applyProgress:RNSideDrawerClamp(preservedProgress, 0, 1)];
+  if (_phase == RNSideDrawerPhaseDragging) {
+    _dragStartRawReveal = [self directRawRevealForPresentation:_reveal];
+    _dragRawReveal = _dragStartRawReveal;
+    _dragStartTranslation = [_scrollView.panGestureRecognizer translationInView:self].x * _revealDirection;
+  }
+  [self setPhysicalOffset:[self physicalOffsetForProgress:[self progress]] allowingBounce:NO];
+  [self applyProgress:[self progress]];
   [self applyContentCorners];
 
   if (resumeSettling) {
-    [self startSettleToOpen:targetOpen revealVelocity:resumeVelocity];
+    [self startSettleToOpen:targetOpen
+             revealVelocity:resumeVelocity
+           allowsOvertravel:resumeAllowsOvertravel];
   } else if (firstLayout) {
-    _open = preservedProgress >= 1;
+    _open = _initialOpen;
     _targetOpen = _open;
     _phase = _open ? RNSideDrawerPhaseOpen : RNSideDrawerPhaseClosed;
     _lastEmittedOpen = _open;
@@ -476,27 +550,37 @@ static RNSideDrawerMotion RNSideDrawerCompileMotion(NSArray<NSNumber *> *config)
     [self finishAtOpen:open];
     return;
   }
-  [self startSettleToOpen:open revealVelocity:revealVelocity];
+  [self startSettleToOpen:open revealVelocity:revealVelocity allowsOvertravel:NO];
 }
 
-- (void)startSettleToOpen:(BOOL)open revealVelocity:(CGFloat)revealVelocity
+- (void)startSettleToOpen:(BOOL)open
+           revealVelocity:(CGFloat)revealVelocity
+         allowsOvertravel:(BOOL)allowsOvertravel
 {
-  CGFloat currentReveal = [self rawRevealForPhysicalOffset:[self currentPhysicalOffset]];
-  if (![self prepareSettleToOpen:open reveal:currentReveal velocity:revealVelocity]) {
+  if (![self prepareSettleToOpen:open
+                          reveal:_reveal
+                        velocity:revealVelocity
+                allowsOvertravel:allowsOvertravel]) {
     [self finishAtOpen:open];
     return;
   }
   [self startSettleDisplayLink];
 }
 
-- (BOOL)prepareSettleToOpen:(BOOL)open reveal:(CGFloat)reveal velocity:(CGFloat)velocity
+- (BOOL)prepareSettleToOpen:(BOOL)open
+                    reveal:(CGFloat)reveal
+                  velocity:(CGFloat)velocity
+          allowsOvertravel:(BOOL)allowsOvertravel
 {
   CGFloat targetReveal = open ? _laidOutDrawerWidth : 0;
   UIScreen *screen = self.window.screen ?: UIScreen.mainScreen;
   CGFloat pixelTolerance = 1.0 / MAX(screen.scale, 1.0);
   CGFloat resolvedVelocity = isfinite(velocity) ? velocity : 0;
-  _settleReveal = reveal;
+  _reveal = reveal;
   _settleVelocity = resolvedVelocity;
+  _settleAllowsOvertravel = allowsOvertravel;
+  CGFloat allowedExcursion = allowsOvertravel ? RNSideDrawerOvertravelLimit : pixelTolerance * 0.5;
+  _settleAngularFrequency = RNSideDrawerSettleFrequency(reveal, resolvedVelocity, targetReveal, allowedExcursion);
   _lastSettleTime = CACurrentMediaTime();
   _settlePausedForTracking = NO;
   _settleActive = YES;
@@ -508,19 +592,20 @@ static RNSideDrawerMotion RNSideDrawerCompileMotion(NSArray<NSNumber *> *config)
 {
   if (!_settleActive) return 0;
   if (!_scrollView.tracking && !_settlePausedForTracking) [self advanceSettleToTime:CACurrentMediaTime()];
-  CGFloat reveal = _settleReveal;
   CGFloat velocity = _settleVelocity;
   _settleActive = NO;
   _settlePausedForTracking = NO;
+  _settleAllowsOvertravel = NO;
   [self stopSettleDisplayLink];
-  CGFloat offset = [self physicalOffsetForRawReveal:reveal];
-  [self setPhysicalOffset:offset allowingBounce:YES];
+  [self applyProgress:[self progress]];
   return velocity;
 }
 
 - (void)pauseActiveSettle
 {
   if (!_settleActive || _settlePausedForTracking) return;
+  [self advanceSettleToTime:CACurrentMediaTime()];
+  [self applyProgress:[self progress]];
   _settleVelocity = 0;
   _settlePausedForTracking = YES;
   _lastSettleTime = MAX(_lastSettleTime, CACurrentMediaTime());
@@ -536,6 +621,7 @@ static RNSideDrawerMotion RNSideDrawerCompileMotion(NSArray<NSNumber *> *config)
 {
   _settleActive = NO;
   _settlePausedForTracking = NO;
+  _settleAllowsOvertravel = NO;
   [self stopSettleDisplayLink];
   _settleVelocity = 0;
   _open = open;
@@ -557,6 +643,7 @@ static RNSideDrawerMotion RNSideDrawerCompileMotion(NSArray<NSNumber *> *config)
   _panelView = nil;
   _contentView = nil;
   _hasLaidOut = NO;
+  _reveal = 0;
   _open = NO;
   _targetOpen = NO;
   _phase = RNSideDrawerPhaseClosed;
@@ -567,13 +654,9 @@ static RNSideDrawerMotion RNSideDrawerCompileMotion(NSArray<NSNumber *> *config)
 {
   if (!_gestureEnabled || _laidOutDrawerWidth <= 0) return NO;
   if (fabs(velocity.x) <= fabs(velocity.y)) return NO;
-  CGFloat rawProgress = [self rawProgressForOffset:[self currentPhysicalOffset]
-                                             width:_laidOutDrawerWidth
-                                         direction:_revealDirection];
-  if (_phase == RNSideDrawerPhaseSettling || rawProgress < 0 || rawProgress > 1) return YES;
   CGFloat revealVelocity = velocity.x * _revealDirection;
-  if (rawProgress <= 0.001) return revealVelocity > 0;
-  if (rawProgress >= 0.999) return revealVelocity < 0;
+  if (_reveal <= 0) return revealVelocity > 0;
+  if (_reveal >= _laidOutDrawerWidth) return revealVelocity < 0;
   return YES;
 }
 
@@ -584,6 +667,14 @@ static RNSideDrawerMotion RNSideDrawerCompileMotion(NSArray<NSNumber *> *config)
   _gestureOriginOpen = interruptedTargetOpen;
   _gestureHapticTriggered = NO;
   if (_settleActive) [self stopSettleAtCurrentPosition];
+  UIScreen *screen = self.window.screen ?: UIScreen.mainScreen;
+  CGFloat pixelTolerance = 1.0 / MAX(screen.scale, 1.0);
+  _gestureReachedPositiveReveal = _reveal > pixelTolerance;
+  _dragStartRawReveal = [self directRawRevealForPresentation:_reveal];
+  _dragRawReveal = _dragStartRawReveal;
+  _dragStartTranslation = [_scrollView.panGestureRecognizer translationInView:self].x * _revealDirection;
+  _dragLowerBound = MIN(_reveal, 0);
+  _dragHasReachedNonnegative = _reveal >= 0;
   _targetOpen = interruptedTargetOpen;
   _releaseRevealVelocity = 0;
   _settlingSource = RNSideDrawerSettlingSourceNone;
@@ -595,9 +686,24 @@ static RNSideDrawerMotion RNSideDrawerCompileMotion(NSArray<NSNumber *> *config)
 - (void)scrollViewDidScroll:(UIScrollView *)scrollView
 {
   (void)scrollView;
-  if (_settleActive) return;
   CGFloat offset = [self currentPhysicalOffset];
-  [self updateCountertrackedFramesForOffset:offset];
+  if (_phase != RNSideDrawerPhaseDragging) {
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    [self updateCountertrackedFramesForOffset:offset];
+    [CATransaction commit];
+    return;
+  }
+  CGFloat translation = [_scrollView.panGestureRecognizer translationInView:self].x * _revealDirection;
+  CGFloat rawReveal = _dragStartRawReveal + translation - _dragStartTranslation;
+  if (!_dragHasReachedNonnegative) {
+    rawReveal = MAX(_dragLowerBound, rawReveal);
+    if (rawReveal >= 0) _dragHasReachedNonnegative = YES;
+  }
+  if (_dragHasReachedNonnegative) rawReveal = MAX(0, rawReveal);
+  _dragRawReveal = rawReveal;
+  _reveal = rawReveal < 0 ? rawReveal : [self directRevealForRawReveal:rawReveal];
+  if (_reveal > 0) _gestureReachedPositiveReveal = YES;
   [self applyProgress:[self progress]];
   [self publishProgress];
 }
@@ -607,18 +713,11 @@ static RNSideDrawerMotion RNSideDrawerCompileMotion(NSArray<NSNumber *> *config)
                targetContentOffset:(inout CGPoint *)targetContentOffset
 {
   (void)scrollView;
-  CGFloat naturalReveal = [self revealOffsetForPhysicalOffset:targetContentOffset->x];
-  BOOL targetOpen = naturalReveal >= _laidOutDrawerWidth * 0.5;
+  (void)velocity;
   CGFloat currentOffset = [self currentPhysicalOffset];
-  CGFloat physicalVelocity = velocity.x * RNSideDrawerMillisecondsPerSecond;
-  _releaseRevealVelocity = [self revealVelocityFromPhysicalVelocity:physicalVelocity];
-  if (targetOpen != _gestureOriginOpen && !_gestureHapticTriggered) {
-    _gestureHapticTriggered = YES;
-    [_hapticFeedback trigger];
-  }
-  _targetOpen = targetOpen;
-  _settlingSource = RNSideDrawerSettlingSourceRelease;
-  _phase = RNSideDrawerPhaseSettling;
+  CGFloat revealVelocity = [_scrollView.panGestureRecognizer velocityInView:self].x * _revealDirection;
+  revealVelocity *= [self directVelocityScaleForRawReveal:_dragRawReveal];
+  [self commitReleaseWithRevealVelocity:revealVelocity];
   targetContentOffset->x = currentOffset;
   targetContentOffset->y = 0;
   [self publishProgress];
@@ -629,26 +728,24 @@ static RNSideDrawerMotion RNSideDrawerCompileMotion(NSArray<NSNumber *> *config)
   (void)scrollView;
   (void)decelerate;
   if (_phase == RNSideDrawerPhaseDragging) {
-    CGFloat revealVelocity = [_scrollView.panGestureRecognizer velocityInView:self].x * _revealDirection;
-    CGFloat reveal = [self rawRevealForPhysicalOffset:[self currentPhysicalOffset]];
-    CGFloat naturalReveal = RNSideDrawerProjectOffset(
-        reveal,
-        revealVelocity / RNSideDrawerMillisecondsPerSecond,
-        _scrollView.decelerationRate);
-    _targetOpen = naturalReveal >= _laidOutDrawerWidth * 0.5;
-    _releaseRevealVelocity = revealVelocity;
-    _settlingSource = RNSideDrawerSettlingSourceRelease;
-    _phase = RNSideDrawerPhaseSettling;
-    if (_scrollView.panGestureRecognizer.state == UIGestureRecognizerStateEnded &&
-        _targetOpen != _gestureOriginOpen && !_gestureHapticTriggered) {
-      _gestureHapticTriggered = YES;
-      [_hapticFeedback trigger];
+    if (_scrollView.panGestureRecognizer.state == UIGestureRecognizerStateEnded) {
+      CGFloat revealVelocity = [_scrollView.panGestureRecognizer velocityInView:self].x * _revealDirection;
+      revealVelocity *= [self directVelocityScaleForRawReveal:_dragRawReveal];
+      [self commitReleaseWithRevealVelocity:revealVelocity];
+    } else {
+      _targetOpen = [self progress] >= 0.5;
+      _releaseRevealVelocity = 0;
+      _settleAllowsOvertravel = NO;
+      _settlingSource = RNSideDrawerSettlingSourceRelease;
+      _phase = RNSideDrawerPhaseSettling;
     }
   }
   if (_phase != RNSideDrawerPhaseSettling) return;
   CGFloat offset = [self currentPhysicalOffset];
-  CGFloat reveal = [self rawRevealForPhysicalOffset:offset];
-  BOOL shouldAnimate = [self prepareSettleToOpen:_targetOpen reveal:reveal velocity:_releaseRevealVelocity];
+  BOOL shouldAnimate = [self prepareSettleToOpen:_targetOpen
+                                         reveal:_reveal
+                                       velocity:_releaseRevealVelocity
+                               allowsOvertravel:_settleAllowsOvertravel];
   [self stopScrollMotionAtOffset:offset];
   if (shouldAnimate) {
     [self startSettleDisplayLink];
@@ -661,12 +758,34 @@ static RNSideDrawerMotion RNSideDrawerCompileMotion(NSArray<NSNumber *> *config)
 {
   (void)scrollView;
   if (!_settleActive) return;
-  [self stopScrollMotionAtOffset:[self physicalOffsetForRawReveal:_settleReveal]];
+  [self stopScrollMotionAtOffset:[self currentPhysicalOffset]];
 }
 
 - (void)scrollViewDidEndDecelerating:(UIScrollView *)scrollView
 {
   (void)scrollView;
+}
+
+- (void)commitReleaseWithRevealVelocity:(CGFloat)revealVelocity
+{
+  CGFloat projectedReveal = RNSideDrawerProjectOffset(
+      RNSideDrawerClamp(_reveal, 0, _laidOutDrawerWidth),
+      revealVelocity / RNSideDrawerMillisecondsPerSecond,
+      _scrollView.decelerationRate);
+  BOOL targetOpen = projectedReveal >= _laidOutDrawerWidth * 0.5;
+  if (targetOpen != _gestureOriginOpen && !_gestureHapticTriggered) {
+    _gestureHapticTriggered = YES;
+    [_hapticFeedback trigger];
+  }
+  CGFloat targetReveal = targetOpen ? _laidOutDrawerWidth : 0;
+  CGFloat baseExcursion = RNSideDrawerOutwardExcursion(
+      _reveal, revealVelocity, targetReveal, RNSideDrawerSettleAngularFrequency);
+  _settleAllowsOvertravel = baseExcursion >= RNSideDrawerOvertravelAdmissionExcursion &&
+      (targetOpen || _gestureReachedPositiveReveal);
+  _releaseRevealVelocity = revealVelocity;
+  _targetOpen = targetOpen;
+  _settlingSource = RNSideDrawerSettlingSourceRelease;
+  _phase = RNSideDrawerPhaseSettling;
 }
 
 - (NSInteger)resolvedRevealDirection
@@ -678,40 +797,36 @@ static RNSideDrawerMotion RNSideDrawerCompileMotion(NSArray<NSNumber *> *config)
 
 - (CGFloat)progress
 {
-  return RNSideDrawerClamp(
-      [self rawRevealForPhysicalOffset:[self currentPhysicalOffset]] / MAX(_laidOutDrawerWidth, 1), 0, 1);
-}
-
-- (CGFloat)rawProgressForOffset:(CGFloat)offset width:(CGFloat)width direction:(NSInteger)direction
-{
-  if (width <= 0) return 0;
-  return direction > 0 ? 1 - offset / width : offset / width;
+  return RNSideDrawerClamp(_reveal / MAX(_laidOutDrawerWidth, 1), 0, 1);
 }
 
 - (CGFloat)physicalOffsetForProgress:(CGFloat)progress
 {
   CGFloat boundedProgress = RNSideDrawerClamp(progress, 0, 1);
-  return [self physicalOffsetForRawReveal:boundedProgress * _laidOutDrawerWidth];
-}
-
-- (CGFloat)physicalOffsetForRawReveal:(CGFloat)reveal
-{
+  CGFloat reveal = boundedProgress * _laidOutDrawerWidth;
   return _revealDirection > 0 ? _laidOutDrawerWidth - reveal : reveal;
 }
 
-- (CGFloat)revealOffsetForPhysicalOffset:(CGFloat)offset
+- (CGFloat)directRevealForRawReveal:(CGFloat)reveal
 {
-  return RNSideDrawerClamp([self rawRevealForPhysicalOffset:offset], 0, _laidOutDrawerWidth);
+  if (reveal <= _laidOutDrawerWidth) return MAX(0, reveal);
+  CGFloat overtravel = reveal - _laidOutDrawerWidth;
+  return _laidOutDrawerWidth + RNSideDrawerOvertravelLimit * tanh(overtravel / RNSideDrawerOvertravelLimit);
 }
 
-- (CGFloat)rawRevealForPhysicalOffset:(CGFloat)offset
+- (CGFloat)directRawRevealForPresentation:(CGFloat)reveal
 {
-  return _revealDirection > 0 ? _laidOutDrawerWidth - offset : offset;
+  if (reveal <= _laidOutDrawerWidth) return reveal;
+  CGFloat normalized = RNSideDrawerClamp(
+      (reveal - _laidOutDrawerWidth) / RNSideDrawerOvertravelLimit, 0, 1 - 1e-6);
+  return _laidOutDrawerWidth + RNSideDrawerOvertravelLimit * atanh(normalized);
 }
 
-- (CGFloat)revealVelocityFromPhysicalVelocity:(CGFloat)velocity
+- (CGFloat)directVelocityScaleForRawReveal:(CGFloat)reveal
 {
-  return _revealDirection > 0 ? -velocity : velocity;
+  if (reveal <= _laidOutDrawerWidth) return 1;
+  CGFloat normalized = tanh((reveal - _laidOutDrawerWidth) / RNSideDrawerOvertravelLimit);
+  return 1 - normalized * normalized;
 }
 
 - (CGFloat)currentPhysicalOffset
@@ -750,18 +865,24 @@ static RNSideDrawerMotion RNSideDrawerCompileMotion(NSArray<NSNumber *> *config)
   CGPoint center = CGPointMake(offset + self.bounds.size.width * 0.5, self.bounds.size.height * 0.5);
   _contactBackingView.center = center;
   if (_panelView != nil) _panelView.center = center;
+  if (_contentView != nil) {
+    _contentView.center = CGPointMake(center.x + _revealDirection * _reveal, center.y);
+  }
 }
 
 - (void)setProgress:(CGFloat)progress
 {
-  [self setPhysicalOffset:[self physicalOffsetForProgress:progress]];
-  [self applyProgress:RNSideDrawerClamp(progress, 0, 1)];
+  CGFloat boundedProgress = RNSideDrawerClamp(progress, 0, 1);
+  _reveal = boundedProgress * _laidOutDrawerWidth;
+  [self setPhysicalOffset:[self physicalOffsetForProgress:boundedProgress]];
+  [self applyProgress:boundedProgress];
 }
 
 - (void)applyProgress:(CGFloat)progress
 {
   [CATransaction begin];
   [CATransaction setDisableActions:YES];
+  [self updateCountertrackedFramesForOffset:[self currentPhysicalOffset]];
 
   CGFloat drawerOpacity = _motion[RNSideDrawerMotionDrawerOpacity].evaluate(progress, 1);
   CGFloat drawerScale = _motion[RNSideDrawerMotionDrawerScale].evaluate(progress, 1);
@@ -817,11 +938,11 @@ static RNSideDrawerMotion RNSideDrawerCompileMotion(NSArray<NSNumber *> *config)
   if (!_settleActive || time <= _lastSettleTime) return;
   CFTimeInterval elapsed = time - _lastSettleTime;
   CGFloat target = _targetOpen ? _laidOutDrawerWidth : 0;
-  CGFloat displacement = _settleReveal - target;
-  CGFloat coefficient = _settleVelocity + RNSideDrawerSettleAngularFrequency * displacement;
-  CGFloat decay = exp(-RNSideDrawerSettleAngularFrequency * elapsed);
-  _settleReveal = target + (displacement + coefficient * elapsed) * decay;
-  _settleVelocity = (_settleVelocity - RNSideDrawerSettleAngularFrequency * coefficient * elapsed) * decay;
+  CGFloat displacement = _reveal - target;
+  CGFloat coefficient = _settleVelocity + _settleAngularFrequency * displacement;
+  CGFloat decay = exp(-_settleAngularFrequency * elapsed);
+  _reveal = target + (displacement + coefficient * elapsed) * decay;
+  _settleVelocity = (_settleVelocity - _settleAngularFrequency * coefficient * elapsed) * decay;
   _lastSettleTime = time;
 }
 
@@ -829,6 +950,12 @@ static RNSideDrawerMotion RNSideDrawerCompileMotion(NSArray<NSNumber *> *config)
 {
   [self stopSettleDisplayLink];
   _settleDisplayLink = [CADisplayLink displayLinkWithTarget:self selector:@selector(stepSettleDisplayLink:)];
+  if (@available(iOS 15.0, *)) {
+    NSInteger maximumFramesPerSecond = (self.window.screen ?: UIScreen.mainScreen).maximumFramesPerSecond;
+    Float64 preferred = MIN(120, maximumFramesPerSecond);
+    Float64 minimum = MIN(80, preferred);
+    _settleDisplayLink.preferredFrameRateRange = CAFrameRateRangeMake(minimum, preferred, preferred);
+  }
   [_settleDisplayLink addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
 }
 
@@ -851,14 +978,12 @@ static RNSideDrawerMotion RNSideDrawerCompileMotion(NSArray<NSNumber *> *config)
   }
   _settlePausedForTracking = NO;
   [self advanceSettleToTime:displayLink.targetTimestamp];
-  [self setPhysicalOffset:[self physicalOffsetForRawReveal:_settleReveal] allowingBounce:YES];
-  CGFloat progress = RNSideDrawerClamp(_settleReveal / MAX(_laidOutDrawerWidth, 1), 0, 1);
-  [self applyProgress:progress];
+  [self applyProgress:[self progress]];
   [self publishProgress];
   UIScreen *screen = self.window.screen ?: UIScreen.mainScreen;
   CGFloat pixelTolerance = 1.0 / MAX(screen.scale, 1.0);
   CGFloat target = _targetOpen ? _laidOutDrawerWidth : 0;
-  if (fabs(_settleReveal - target) <= pixelTolerance &&
+  if (fabs(_reveal - target) <= pixelTolerance &&
       fabs(_settleVelocity) <= RNSideDrawerSettleVelocityTolerance) {
     [self finishAtOpen:_targetOpen];
   }
