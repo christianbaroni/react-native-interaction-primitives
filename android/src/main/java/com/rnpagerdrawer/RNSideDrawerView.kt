@@ -78,6 +78,7 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
     private var gestureEligible = false
     private var isDragging = false
     private var hasDragged = false
+    private var gestureOriginOpen = false
     private var downX = 0f
     private var downY = 0f
     private var dragStartX = 0f
@@ -365,7 +366,7 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
     private fun settleFromRelease(velocityPxPerSecond: Float, performHaptic: Boolean) {
         val naturalReveal = naturalTargetReveal(presentedRevealPx(), velocityPxPerSecond)
         val nextOpen = naturalReveal >= laidOutDrawerWidthPx * 0.5f
-        if (performHaptic) gestureReleaseHaptic?.perform(this)
+        if (performHaptic && nextOpen != gestureOriginOpen) gestureReleaseHaptic?.perform(this)
         settleToOpen(nextOpen, SettlingSource.Release, true, velocityPxPerSecond)
     }
 
@@ -465,6 +466,7 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
         if (isDragging) return
         val wasSettling = phase == Phase.Settling
         val interruptedTarget = if (wasSettling) targetOpen else open
+        gestureOriginOpen = interruptedTarget
         if (wasSettling) synchronizeSettleFrame()
         settleRunning = false
         isDragging = true

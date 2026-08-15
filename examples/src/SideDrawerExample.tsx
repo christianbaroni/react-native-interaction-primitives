@@ -50,7 +50,7 @@ export function SideDrawerExample({ navigation }: { navigation: React.ReactNode 
         </View>
       }
       drawerWidth={drawerWidth}
-      gestureReleaseHaptic="soft"
+      gestureReleaseHaptic="rigid"
       motion={DRAWER_MOTION}
       onOpenChange={setOpen}
       ref={drawerRef}

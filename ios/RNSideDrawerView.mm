@@ -93,6 +93,7 @@ using RNSideDrawerMotion = std::array<RNSideDrawerInterpolation, RNSideDrawerMot
 - (void)applyContentCorners;
 - (void)advanceSettleToTime:(CFTimeInterval)time;
 - (void)finishAtOpen:(BOOL)open;
+- (void)handleContactBegin;
 - (CGFloat)physicalOffsetForRawReveal:(CGFloat)reveal;
 - (void)pauseActiveSettle;
 - (BOOL)prepareSettleToOpen:(BOOL)open reveal:(CGFloat)reveal velocity:(CGFloat)velocity;
@@ -122,6 +123,8 @@ using RNSideDrawerMotion = std::array<RNSideDrawerInterpolation, RNSideDrawerMot
   BOOL _settleActive;
   BOOL _settlePausedForTracking;
   BOOL _hasLaidOut;
+  BOOL _gestureHapticTriggered;
+  BOOL _gestureOriginOpen;
   BOOL _open;
   BOOL _targetOpen;
   BOOL _lastEmittedOpen;
@@ -243,7 +246,7 @@ static RNSideDrawerMotion RNSideDrawerCompileMotion(NSArray<NSNumber *> *config)
 
     __weak RNSideDrawerView *weakSelf = self;
     _scrollView.didBeginContact = ^{
-      [weakSelf pauseActiveSettle];
+      [weakSelf handleContactBegin];
     };
     _scrollView.shouldBeginPan = ^BOOL(CGPoint velocity) {
       RNSideDrawerView *strongSelf = weakSelf;
@@ -523,6 +526,12 @@ static RNSideDrawerMotion RNSideDrawerCompileMotion(NSArray<NSNumber *> *config)
   _lastSettleTime = MAX(_lastSettleTime, CACurrentMediaTime());
 }
 
+- (void)handleContactBegin
+{
+  [_hapticFeedback prepare];
+  [self pauseActiveSettle];
+}
+
 - (void)finishAtOpen:(BOOL)open
 {
   _settleActive = NO;
@@ -572,6 +581,8 @@ static RNSideDrawerMotion RNSideDrawerCompileMotion(NSArray<NSNumber *> *config)
 {
   (void)scrollView;
   BOOL interruptedTargetOpen = _phase == RNSideDrawerPhaseSettling ? _targetOpen : _open;
+  _gestureOriginOpen = interruptedTargetOpen;
+  _gestureHapticTriggered = NO;
   if (_settleActive) [self stopSettleAtCurrentPosition];
   _targetOpen = interruptedTargetOpen;
   _releaseRevealVelocity = 0;
@@ -601,10 +612,13 @@ static RNSideDrawerMotion RNSideDrawerCompileMotion(NSArray<NSNumber *> *config)
   CGFloat currentOffset = [self currentPhysicalOffset];
   CGFloat physicalVelocity = velocity.x * RNSideDrawerMillisecondsPerSecond;
   _releaseRevealVelocity = [self revealVelocityFromPhysicalVelocity:physicalVelocity];
+  if (targetOpen != _gestureOriginOpen && !_gestureHapticTriggered) {
+    _gestureHapticTriggered = YES;
+    [_hapticFeedback trigger];
+  }
   _targetOpen = targetOpen;
   _settlingSource = RNSideDrawerSettlingSourceRelease;
   _phase = RNSideDrawerPhaseSettling;
-  [_hapticFeedback trigger];
   targetContentOffset->x = currentOffset;
   targetContentOffset->y = 0;
   [self publishProgress];
@@ -625,7 +639,9 @@ static RNSideDrawerMotion RNSideDrawerCompileMotion(NSArray<NSNumber *> *config)
     _releaseRevealVelocity = revealVelocity;
     _settlingSource = RNSideDrawerSettlingSourceRelease;
     _phase = RNSideDrawerPhaseSettling;
-    if (_scrollView.panGestureRecognizer.state == UIGestureRecognizerStateEnded) {
+    if (_scrollView.panGestureRecognizer.state == UIGestureRecognizerStateEnded &&
+        _targetOpen != _gestureOriginOpen && !_gestureHapticTriggered) {
+      _gestureHapticTriggered = YES;
       [_hapticFeedback trigger];
     }
   }
