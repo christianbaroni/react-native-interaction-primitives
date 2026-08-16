@@ -74,7 +74,7 @@ The target must be an integer within the currently mounted page range. Invalid t
 
 ### Pager gesture ownership
 
-A touched React Native scroll view on the pager's axis keeps a gesture while it can scroll in that exact direction. At an exhausted edge, the pager remains eligible for the next gesture instead of yielding to child overscroll. Cross-axis gestures remain with the touched content. Once the pager wins, it cancels the touched React responder and momentum in the touched scroll chain before moving the page; a swipe that changes pages cannot later activate the control beneath it.
+A touched React Native scroll view on the pager's axis keeps a gesture while it can scroll in that exact direction. At an exhausted edge, a new same-axis gesture can move the pager instead of overscrolling the child. Cross-axis gestures remain with the touched content. Child-owned momentum cannot drive the pager, and a swipe that changes pages cannot later activate the control beneath it.
 
 Custom React Native Gesture Handler relationships remain explicit. Compose the pager as an RNGH [`Native` gesture](https://docs.swmansion.com/react-native-gesture-handler/docs/gestures/use-native-gesture/) and make a child gesture block that native gesture when the child must take precedence (`blocksExternalGesture` in RNGH 2, `block` in RNGH 3). The package does not infer custom-handler intent from Android's undifferentiated interception signal, and it does not require RNGH when the app does not use it.
 

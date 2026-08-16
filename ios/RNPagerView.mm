@@ -1,6 +1,7 @@
 #import "RNPagerView.h"
 
 #import "RNPagerPageView.h"
+#import "RNPagerScrollView.h"
 
 #import <React/UIView+React.h>
 #import <QuartzCore/QuartzCore.h>
@@ -19,23 +20,6 @@ typedef NS_ENUM(NSInteger, RNPagerSettlingSource) {
   RNPagerSettlingSourceRelease,
 };
 
-@interface RNPagerScrollView : UIScrollView
-@property (nonatomic, weak, nullable) UIView *interactionBoundsView;
-@end
-
-@implementation RNPagerScrollView
-
-- (BOOL)pointInside:(CGPoint)point withEvent:(UIEvent *)event
-{
-  if ([super pointInside:point withEvent:event]) return YES;
-  UIView *interactionBoundsView = self.interactionBoundsView;
-  if (interactionBoundsView == nil) return NO;
-  CGPoint interactionPoint = [interactionBoundsView convertPoint:point fromView:self];
-  return [interactionBoundsView pointInside:interactionPoint withEvent:event];
-}
-
-@end
-
 @interface RNPagerView () <UIScrollViewDelegate>
 - (NSInteger)resolveSettlingTargetForNaturalTargetOffset:(CGFloat)naturalTargetOffset;
 - (void)applyScrollPhysicsConfiguration;
@@ -53,7 +37,7 @@ typedef NS_ENUM(NSInteger, RNPagerSettlingSource) {
 @end
 
 @implementation RNPagerView {
-  UIScrollView *_scrollView;
+  RNPagerScrollView *_scrollView;
   UIView *_contentView;
   NSMutableArray<UIView *> *_pages;
   RNPagerPhase _phase;
@@ -127,6 +111,8 @@ static NSInteger RNPagerResolveTargetPage(
 
     RNPagerScrollView *scrollView = [[RNPagerScrollView alloc] initWithFrame:self.bounds];
     scrollView.interactionBoundsView = self;
+    scrollView.pagerOrientation = _orientation;
+    scrollView.pagerScrollEnabled = _scrollEnabled;
     _scrollView = scrollView;
     _scrollView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     _scrollView.clipsToBounds = NO;
@@ -166,7 +152,7 @@ static NSInteger RNPagerResolveTargetPage(
 - (void)setScrollEnabled:(BOOL)scrollEnabled
 {
   _scrollEnabled = scrollEnabled;
-  _scrollView.scrollEnabled = scrollEnabled;
+  _scrollView.pagerScrollEnabled = scrollEnabled;
 }
 
 - (void)setInitialPage:(NSInteger)initialPage
@@ -192,8 +178,24 @@ static NSInteger RNPagerResolveTargetPage(
 - (void)setOrientation:(RNPagerOrientation)orientation
 {
   if (_orientation == orientation) return;
+
+  const BOOL motionWasActive = _phase == RNPagerPhaseDragging || _phase == RNPagerPhaseSettling;
+  NSInteger page = _selectedPage;
+  if (_phase == RNPagerPhaseSettling) {
+    page = _targetPage;
+  } else if (_phase == RNPagerPhaseDragging) {
+    page = [self currentSettledPage];
+  }
+
+  [_scrollView prepareForPagerMotion];
+  [self stopSettlingFinishWatcher];
+  if (_nativeScrollAnimationActive) [self stopNativeScrollAnimationAtPresentationOffset];
+  if (motionWasActive) [self finishSettlingAtPage:page];
+
   _orientation = orientation;
+  _scrollView.pagerOrientation = orientation;
   [self applyScrollPhysicsConfiguration];
+  [self layoutPagesPreservingPosition:NO];
   [self setNeedsLayout];
 }
 
@@ -243,6 +245,7 @@ static NSInteger RNPagerResolveTargetPage(
 
 - (void)unmountPage:(UIView *)page
 {
+  [_scrollView willRemoveContentView:page];
   [_pages removeObjectIdenticalTo:page];
   [page removeFromSuperview];
   _selectedPage = RNPagerClampPage(_selectedPage, _pages.count);
@@ -257,6 +260,7 @@ static NSInteger RNPagerResolveTargetPage(
 - (void)setPage:(NSInteger)page animated:(BOOL)animated
 {
   if (page < 0 || page >= (NSInteger)_pages.count) return;
+  [_scrollView prepareForPagerMotion];
   if (_phase == RNPagerPhaseSettling) {
     [self stopNativeScrollAnimationAtPresentationOffset];
   }
@@ -299,6 +303,7 @@ static NSInteger RNPagerResolveTargetPage(
 
 - (void)prepareForRemoval
 {
+  [_scrollView prepareForPagerMotion];
   [self stopSettlingFinishWatcher];
   if (_nativeScrollAnimationActive || _phase == RNPagerPhaseSettling) {
     [self stopNativeScrollAnimationAtPresentationOffset];
