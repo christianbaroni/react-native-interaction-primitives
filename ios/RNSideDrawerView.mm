@@ -520,6 +520,7 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
     _hapticFeedback = [[RNPagerDrawerHapticFeedback alloc] initWithView:self];
   }
   _hapticFeedback.type = gestureReleaseHaptic;
+  if (_phase == RNSideDrawerPhaseDragging) [_hapticFeedback prepare];
 }
 
 - (NSString *)gestureReleaseHaptic
