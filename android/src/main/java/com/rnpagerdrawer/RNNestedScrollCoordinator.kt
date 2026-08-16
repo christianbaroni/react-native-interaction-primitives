@@ -1,11 +1,39 @@
 package com.rnpagerdrawer
 
+import android.os.SystemClock
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import com.facebook.react.uimanager.TouchTargetHelper
+import com.facebook.react.uimanager.events.NativeGestureUtil
 
 internal class RNNestedScrollCoordinator(private val container: ViewGroup) {
     private val nativeTouchTarget = IntArray(1)
+    private var nativeGestureActive = false
+
+    fun beginNativeGesture(event: MotionEvent) {
+        if (nativeGestureActive) return
+        nativeGestureActive = true
+        NativeGestureUtil.notifyNativeGestureStarted(container, event)
+    }
+
+    fun endNativeGesture(event: MotionEvent) {
+        if (!nativeGestureActive) return
+        nativeGestureActive = false
+        NativeGestureUtil.notifyNativeGestureEnded(container, event)
+    }
+
+    fun cancelNativeGesture() {
+        if (!nativeGestureActive) return
+        nativeGestureActive = false
+        val now = SystemClock.uptimeMillis()
+        val cancelEvent = MotionEvent.obtain(now, now, MotionEvent.ACTION_CANCEL, 0f, 0f, 0)
+        try {
+            NativeGestureUtil.notifyNativeGestureEnded(container, cancelEvent)
+        } finally {
+            cancelEvent.recycle()
+        }
+    }
 
     fun touchedDescendantCanScrollHorizontally(x: Float, y: Float, fingerDelta: Float): Boolean =
         touchedDescendantCanScroll(x, y, if (fingerDelta > 0f) -1 else 1, horizontal = true)

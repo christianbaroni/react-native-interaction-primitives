@@ -229,7 +229,7 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
                 } else {
                     resumePausedSettle()
                 }
-                finishTouch()
+                clearTouchTracking()
             }
         }
 
@@ -287,7 +287,7 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
         val handled = super.dispatchTouchEvent(event)
         if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) {
             resumePausedSettle()
-            finishTouch()
+            finishTouch(event)
         }
         return handled
     }
@@ -392,6 +392,7 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
                 if (drawerCanMove && horizontalIntent) {
                     beginDragging(event.getX(pointerIndex))
                     hasDragged = true
+                    nestedScrollCoordinator.beginNativeGesture(event)
                     parent?.requestDisallowInterceptTouchEvent(true)
                     return true
                 }
@@ -401,7 +402,7 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
             }
             MotionEvent.ACTION_CANCEL, MotionEvent.ACTION_UP -> {
                 resumePausedSettle()
-                finishTouch()
+                finishTouch(event)
             }
         }
         return false
@@ -425,6 +426,7 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
                     if (canMoveInDirection(deltaX * openingDirection()) && horizontalIntent) {
                         beginDragging(x)
                         hasDragged = true
+                        nestedScrollCoordinator.beginNativeGesture(event)
                         parent?.requestDisallowInterceptTouchEvent(true)
                     }
                 }
@@ -451,7 +453,7 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
                 } else {
                     resumePausedSettle()
                 }
-                finishTouch()
+                finishTouch(event)
                 return true
             }
             MotionEvent.ACTION_CANCEL -> {
@@ -466,7 +468,7 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
                 } else {
                     resumePausedSettle()
                 }
-                finishTouch()
+                finishTouch(event)
                 return true
             }
         }
@@ -481,7 +483,7 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
             Phase.Settling -> finishAtOpen(targetOpen)
             Phase.Closed, Phase.Open -> Unit
         }
-        finishTouch()
+        cancelTouchInteraction()
         super.onDetachedFromWindow()
     }
 
@@ -562,7 +564,7 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
     fun prepareForRemoval() {
         stopSettleFrames()
         setHighFrameRateRequested(false)
-        finishTouch()
+        cancelTouchInteraction()
         contentView?.onScrimPress = null
         panelView?.let { super.removeView(it) }
         contentView?.let { contentPresentationView.removeContentView(it) }
@@ -602,7 +604,7 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
         val initialVelocity = if (phase == Phase.Settling) settleVelocityPxPerSecond else 0.0
         stopSettleFrames()
         settlePausedForTouch = false
-        if (isDragging) finishTouch()
+        if (isDragging) clearTouchTracking()
         settleToOpen(nextOpen, SettlingSource.Programmatic, animated, initialVelocity)
     }
 
@@ -750,7 +752,7 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
         publishProgress()
     }
 
-    private fun finishTouch() {
+    private fun clearTouchTracking() {
         activePointerId = INVALID_POINTER_ID
         gestureEligible = false
         isDragging = false
@@ -759,6 +761,16 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
         super.requestDisallowInterceptTouchEvent(false)
         velocityTracker?.recycle()
         velocityTracker = null
+    }
+
+    private fun finishTouch(event: MotionEvent) {
+        clearTouchTracking()
+        nestedScrollCoordinator.endNativeGesture(event)
+    }
+
+    private fun cancelTouchInteraction() {
+        clearTouchTracking()
+        nestedScrollCoordinator.cancelNativeGesture()
     }
 
     private fun handlePointerUp(event: MotionEvent) {

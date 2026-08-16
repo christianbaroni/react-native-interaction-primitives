@@ -55,8 +55,10 @@ internal class RNPagerView(private val reactContext: ThemedReactContext) : ViewG
     private var lastEmittedPage = Int.MIN_VALUE
     private var lastMainAxisPx = 0f
     private var lastPageExtentPx = 0f
+    private var pausedSettleVelocityPxPerSecond = 0f
     private var phase = Phase.Empty
     private var selectedPage = 0
+    private var settlePausedForTouch = false
     private var settlingSource = SettlingSource.None
     private var targetPage = -1
     private var velocityTracker: VelocityTracker? = null
@@ -70,7 +72,21 @@ internal class RNPagerView(private val reactContext: ThemedReactContext) : ViewG
     var orientation: Orientation = Orientation.Horizontal
         set(value) {
             if (field == value) return
+
+            if (phase == Phase.Settling) synchronizeScrollerFrame()
+            val page = when (phase) {
+                Phase.Settling -> targetPage
+                Phase.Dragging -> currentSettledPage()
+                Phase.Empty, Phase.Idle -> selectedPage
+            }
+            clearTouchTracking()
+            scroller.abortAnimation()
+            if (phase == Phase.Dragging || phase == Phase.Settling) {
+                finishSettlingAtPage(page)
+            }
+
             field = value
+            lastPageExtentPx = 0f
             requestLayout()
         }
 
@@ -98,8 +114,10 @@ internal class RNPagerView(private val reactContext: ThemedReactContext) : ViewG
                 if (isDragging) {
                     val page = clampPage((currentOffsetPx() / max(pageExtentPx(), 1f)).roundToInt())
                     settleToPage(page, SettlingSource.Release, true)
+                } else {
+                    resumePausedSettle()
                 }
-                finishTouch()
+                clearTouchTracking()
             }
         }
 
@@ -120,7 +138,7 @@ internal class RNPagerView(private val reactContext: ThemedReactContext) : ViewG
             Phase.Settling -> finishSettlingAtPage(targetPage)
             Phase.Empty, Phase.Idle -> Unit
         }
-        finishTouch()
+        cancelTouchInteraction()
         super.onDetachedFromWindow()
     }
 
@@ -174,19 +192,24 @@ internal class RNPagerView(private val reactContext: ThemedReactContext) : ViewG
         publishState()
     }
 
+    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        if (pagerScrollEnabled && pages.size > 1 && event.actionMasked == MotionEvent.ACTION_DOWN) {
+            pauseSettleForTouch()
+        }
+        val handled = super.dispatchTouchEvent(event)
+        if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) {
+            resumePausedSettle()
+            finishTouch(event)
+        }
+        return handled
+    }
+
     override fun onInterceptTouchEvent(event: MotionEvent): Boolean {
         if (!pagerScrollEnabled || pages.size <= 1) return false
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 gestureEligible = true
                 initializeTouch(event)
-                if (!scroller.isFinished) {
-                    synchronizeScrollerFrame()
-                    beginDraggingFromCurrentOffset()
-                    scroller.abortAnimation()
-                    parent?.requestDisallowInterceptTouchEvent(true)
-                    return true
-                }
             }
             MotionEvent.ACTION_MOVE -> {
                 if (!gestureEligible) return false
@@ -204,6 +227,7 @@ internal class RNPagerView(private val reactContext: ThemedReactContext) : ViewG
                 if (mainAxisIntent) {
                     beginDraggingFromCurrentOffset()
                     lastMainAxisPx = main
+                    nestedScrollCoordinator.beginNativeGesture(event)
                     parent?.requestDisallowInterceptTouchEvent(true)
                     return true
                 }
@@ -211,7 +235,10 @@ internal class RNPagerView(private val reactContext: ThemedReactContext) : ViewG
                     yieldGestureToDescendant()
                 }
             }
-            MotionEvent.ACTION_CANCEL, MotionEvent.ACTION_UP -> finishTouch()
+            MotionEvent.ACTION_CANCEL, MotionEvent.ACTION_UP -> {
+                resumePausedSettle()
+                finishTouch(event)
+            }
         }
         return false
     }
@@ -236,12 +263,6 @@ internal class RNPagerView(private val reactContext: ThemedReactContext) : ViewG
             if (isDragging) return true
             gestureEligible = true
             initializeTouch(event)
-            if (!scroller.isFinished) {
-                synchronizeScrollerFrame()
-                beginDraggingFromCurrentOffset()
-                scroller.abortAnimation()
-                parent?.requestDisallowInterceptTouchEvent(true)
-            }
             return true
         }
         ensureVelocityTracker().addMovement(event)
@@ -256,6 +277,7 @@ internal class RNPagerView(private val reactContext: ThemedReactContext) : ViewG
                     val crossDelta = crossAxis(event, pointerIndex) - downCrossAxisPx
                     if (abs(mainDelta) > touchSlop && abs(mainDelta) > abs(crossDelta)) {
                         beginDraggingFromCurrentOffset()
+                        nestedScrollCoordinator.beginNativeGesture(event)
                         parent?.requestDisallowInterceptTouchEvent(true)
                     }
                 }
@@ -277,7 +299,7 @@ internal class RNPagerView(private val reactContext: ThemedReactContext) : ViewG
                     }
                     settleFromRelease(velocity)
                 }
-                finishTouch()
+                finishTouch(event)
                 return true
             }
             MotionEvent.ACTION_CANCEL -> {
@@ -288,7 +310,7 @@ internal class RNPagerView(private val reactContext: ThemedReactContext) : ViewG
                         true,
                     )
                 }
-                finishTouch()
+                finishTouch(event)
                 return true
             }
         }
@@ -296,7 +318,7 @@ internal class RNPagerView(private val reactContext: ThemedReactContext) : ViewG
     }
 
     override fun computeScroll() {
-        if (phase != Phase.Settling) return
+        if (phase != Phase.Settling || settlePausedForTouch) return
         if (scroller.computeScrollOffset()) {
             val offset = if (orientation == Orientation.Horizontal) scroller.currX else scroller.currY
             scrollToOffsetPx(offset.toFloat())
@@ -325,8 +347,12 @@ internal class RNPagerView(private val reactContext: ThemedReactContext) : ViewG
         val page = pages.removeAt(index)
         super.removeView(page)
         selectedPage = clampPage(selectedPage)
-        if (pages.isEmpty()) hasLaidOutPages = false
-        if (pages.isEmpty()) transitionToPhase(Phase.Empty)
+        if (pages.isEmpty()) {
+            hasLaidOutPages = false
+            scroller.abortAnimation()
+            clearPausedSettle()
+            transitionToPhase(Phase.Empty)
+        }
         requestLayout()
         publishState()
     }
@@ -334,12 +360,14 @@ internal class RNPagerView(private val reactContext: ThemedReactContext) : ViewG
     fun setPage(page: Int, animated: Boolean) {
         if (page !in pages.indices) return
         if (phase == Phase.Settling) synchronizeScrollerFrame()
+        clearTouchTracking()
         settleToPage(page, SettlingSource.Programmatic, animated)
     }
 
     fun prepareForRemoval() {
-        finishTouch()
+        cancelTouchInteraction()
         scroller.abortAnimation()
+        clearPausedSettle()
         pages.clear()
         removeAllViews()
         hasLaidOutPages = false
@@ -357,7 +385,7 @@ internal class RNPagerView(private val reactContext: ThemedReactContext) : ViewG
         isDragging = false
     }
 
-    private fun finishTouch() {
+    private fun clearTouchTracking() {
         activePointerId = INVALID_POINTER_ID
         gestureEligible = false
         isDragging = false
@@ -365,6 +393,16 @@ internal class RNPagerView(private val reactContext: ThemedReactContext) : ViewG
         super.requestDisallowInterceptTouchEvent(false)
         velocityTracker?.recycle()
         velocityTracker = null
+    }
+
+    private fun finishTouch(event: MotionEvent) {
+        clearTouchTracking()
+        nestedScrollCoordinator.endNativeGesture(event)
+    }
+
+    private fun cancelTouchInteraction() {
+        clearTouchTracking()
+        nestedScrollCoordinator.cancelNativeGesture()
     }
 
     private fun yieldGestureToDescendant() {
@@ -407,7 +445,14 @@ internal class RNPagerView(private val reactContext: ThemedReactContext) : ViewG
     private fun beginDraggingFromCurrentOffset() {
         if (isDragging) return
         val interruptedTarget = if (phase == Phase.Settling) targetPage else null
-        val interruptedVelocity = if (phase == Phase.Settling && !scroller.isFinished) currentScrollerVelocityPxPerSecond() else 0f
+        val interruptedVelocity = when {
+            phase != Phase.Settling -> 0f
+            settlePausedForTouch -> pausedSettleVelocityPxPerSecond
+            !scroller.isFinished -> currentScrollerVelocityPxPerSecond()
+            else -> 0f
+        }
+        clearPausedSettle()
+        scroller.abortAnimation()
         isDragging = true
         anchorOffsetPx = currentOffsetPx()
         val extent = pageExtentPx()
@@ -434,6 +479,7 @@ internal class RNPagerView(private val reactContext: ThemedReactContext) : ViewG
         animated: Boolean,
         releaseVelocityPxPerSecond: Float = 0f,
     ) {
+        clearPausedSettle()
         if (source == SettlingSource.Programmatic) {
             anchorOffsetPx = currentOffsetPx()
             anchorPage = currentSettledPage()
@@ -443,27 +489,12 @@ internal class RNPagerView(private val reactContext: ThemedReactContext) : ViewG
         transitionToPhase(Phase.Settling)
         publishState()
 
-        val start = currentOffsetPx().roundToInt()
-        val end = offsetForPage(targetPage).roundToInt()
-        scroller.abortAnimation()
-        if (!animated || start == end) {
-            scrollToOffsetPx(end.toFloat())
-            publishPageScroll()
-            finishSettlingAtPage(targetPage)
-            return
-        }
-        if (source != SettlingSource.Release || !startReleaseFling(start, end, releaseVelocityPxPerSecond)) {
-            if (orientation == Orientation.Horizontal) {
-                scroller.startScroll(start, 0, end - start, 0)
-            } else {
-                scroller.startScroll(0, start, 0, end - start)
-            }
-        }
-        postInvalidateOnAnimation()
+        startSettlingAnimation(animated, releaseVelocityPxPerSecond)
     }
 
     private fun finishSettlingAtPage(page: Int) {
         if (phase != Phase.Settling && phase != Phase.Dragging) return
+        clearPausedSettle()
         selectedPage = clampPage(page)
         scrollToOffsetPx(offsetForPage(selectedPage))
         transitionToPhase(if (pages.isEmpty()) Phase.Empty else Phase.Idle)
@@ -481,6 +512,52 @@ internal class RNPagerView(private val reactContext: ThemedReactContext) : ViewG
         val remaining = offsetForPage(targetPage) - currentOffsetPx()
         if (remaining == 0f) return 0f
         return scroller.currVelocity * if (remaining > 0f) 1f else -1f
+    }
+
+    private fun pauseSettleForTouch() {
+        if (phase != Phase.Settling || settlePausedForTouch) return
+        synchronizeScrollerFrame()
+        if (phase != Phase.Settling) return
+        pausedSettleVelocityPxPerSecond = if (scroller.isFinished) {
+            0f
+        } else {
+            currentScrollerVelocityPxPerSecond()
+        }
+        scroller.abortAnimation()
+        settlePausedForTouch = true
+    }
+
+    private fun resumePausedSettle() {
+        if (!settlePausedForTouch || phase != Phase.Settling) return
+        clearPausedSettle()
+        startSettlingAnimation(animated = true, releaseVelocityPxPerSecond = 0f)
+    }
+
+    private fun clearPausedSettle() {
+        settlePausedForTouch = false
+        pausedSettleVelocityPxPerSecond = 0f
+    }
+
+    private fun startSettlingAnimation(animated: Boolean, releaseVelocityPxPerSecond: Float) {
+        val start = currentOffsetPx().roundToInt()
+        val end = offsetForPage(targetPage).roundToInt()
+        scroller.abortAnimation()
+        if (!animated || start == end) {
+            scrollToOffsetPx(end.toFloat())
+            publishPageScroll()
+            finishSettlingAtPage(targetPage)
+            return
+        }
+        if (settlingSource != SettlingSource.Release ||
+            !startReleaseFling(start, end, releaseVelocityPxPerSecond)
+        ) {
+            if (orientation == Orientation.Horizontal) {
+                scroller.startScroll(start, 0, end - start, 0)
+            } else {
+                scroller.startScroll(0, start, 0, end - start)
+            }
+        }
+        postInvalidateOnAnimation()
     }
 
     private fun startReleaseFling(start: Int, end: Int, velocityPxPerSecond: Float): Boolean {
