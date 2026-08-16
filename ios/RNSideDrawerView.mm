@@ -1245,13 +1245,11 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
         [screen displayLinkWithTarget:self selector:@selector(samplePresentedTransition:)];
     if (_presentationDisplayLink == nil) return;
     _presentationDisplayScreen = screen;
+    if (@available(iOS 15.0, *)) {
+      Float64 frameRate = MIN(120, screen.maximumFramesPerSecond);
+      _presentationDisplayLink.preferredFrameRateRange = CAFrameRateRangeMake(frameRate, frameRate, frameRate);
+    }
     [_presentationDisplayLink addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
-  }
-  if (@available(iOS 15.0, *)) {
-    NSInteger maximumFramesPerSecond = screen.maximumFramesPerSecond;
-    Float64 preferred = MIN(120, maximumFramesPerSecond);
-    Float64 minimum = MIN(80, preferred);
-    _presentationDisplayLink.preferredFrameRateRange = CAFrameRateRangeMake(minimum, preferred, preferred);
   }
 }
 
