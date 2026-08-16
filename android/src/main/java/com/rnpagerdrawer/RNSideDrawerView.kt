@@ -100,6 +100,8 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
         }
     }
 
+    // Properties
+
     var drawerWidthPx: Float = 0f
         set(value) {
             val next = max(0f, value)
@@ -263,6 +265,8 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
         clipToPadding = true
         super.addView(contentPresentationView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
     }
+
+    // Lifecycle and touch dispatch
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         val measuredWidth = MeasureSpec.getSize(widthMeasureSpec)
@@ -482,6 +486,8 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
         super.onDetachedFromWindow()
     }
 
+    // Renderer slots and commands
+
     fun addDrawerSlot(child: View, index: Int) {
         if (child !is RNSideDrawerPanelView && child !is RNSideDrawerContentView) return
         val boundedIndex = index.coerceIn(0, slots.size)
@@ -510,14 +516,18 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
 
     fun removeDrawerSlotAt(index: Int) {
         val child = slots.removeAt(index)
-        if (child === panelView) {
-            panelView = null
-            super.removeView(child)
-        }
-        if (child === contentView) {
-            contentView?.onScrimPress = null
-            contentView = null
-            contentPresentationView.removeContentView(child as RNSideDrawerContentView)
+        when (child) {
+            is RNSideDrawerPanelView -> {
+                if (child === panelView) panelView = null
+                super.removeView(child)
+            }
+            is RNSideDrawerContentView -> {
+                if (child === contentView) {
+                    child.onScrimPress = null
+                    contentView = null
+                    contentPresentationView.removeContentView(child)
+                }
+            }
         }
     }
 
@@ -574,6 +584,8 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
         progressSnapshotPending = false
         applyPresentation()
     }
+
+    // Settling
 
     private fun setOpen(nextOpen: Boolean, animated: Boolean) {
         if (!hasLaidOut) {
@@ -706,6 +718,8 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
         emitOpenChangeIfNeeded()
         setHighFrameRateRequested(false)
     }
+
+    // Gesture ownership
 
     private fun initializeTouch(event: MotionEvent) {
         velocityTracker?.recycle()
@@ -861,6 +875,8 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
     private fun defaultOverdragPx(): Float =
         DEFAULT_SIDE_DRAWER_OVERDRAG_DP * resources.displayMetrics.density
 
+    // Presentation
+
     private fun setHighFrameRateRequested(requested: Boolean) {
         if (highFrameRateRequested == requested) return
         highFrameRateRequested = requested
@@ -960,6 +976,8 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
     }
 
     private fun targetPosition(nextOpen: Boolean): Float = if (nextOpen) laidOutDrawerWidthPx else 0f
+
+    // Events
 
     private fun phaseName(): String = when (phase) {
         Phase.Closed -> "closed"

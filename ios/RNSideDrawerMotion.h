@@ -32,10 +32,7 @@ class Motion final {
 
   bool hasInterpolations() const noexcept
   {
-    for (const Interpolation &interpolation : interpolations_) {
-      if (interpolation.enabled) return true;
-    }
-    return false;
+    return hasInterpolations_;
   }
 
  private:
@@ -46,7 +43,6 @@ class Motion final {
   };
 
   struct Interpolation {
-    bool enabled{false};
     CGFloat firstInput{0};
     CGFloat firstOutput{0};
     CGFloat lastInput{0};
@@ -55,7 +51,7 @@ class Motion final {
 
     CGFloat evaluate(CGFloat progress, CGFloat fallback) const noexcept
     {
-      if (!enabled) return fallback;
+      if (segments.empty()) return fallback;
       if (progress <= firstInput) return firstOutput;
       if (progress >= lastInput) return lastOutput;
 
@@ -72,10 +68,11 @@ class Motion final {
 
   static constexpr std::size_t kChannelCount = static_cast<std::size_t>(MotionChannel::Count);
   std::array<Interpolation, kChannelCount> interpolations_;
+  bool hasInterpolations_{false};
 
-  friend Motion compileMotion(NSArray<NSNumber *> *configuration) noexcept;
+  friend Motion compileMotion(NSArray<NSNumber *> *configuration);
 };
 
-Motion compileMotion(NSArray<NSNumber *> *configuration) noexcept;
+Motion compileMotion(NSArray<NSNumber *> *configuration);
 
 } // namespace rnsidedrawer

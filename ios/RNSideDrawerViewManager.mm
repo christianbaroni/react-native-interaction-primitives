@@ -105,7 +105,6 @@ static NSString *RNSideDrawerHapticValue(RNSideDrawerViewGestureReleaseHaptic va
 
 @end
 
-
 @interface RNSideDrawerContentViewComponentView : RCTViewComponentView <RCTRNSideDrawerContentViewViewProtocol, RNSideDrawerContentSlot>
 @property (nonatomic, copy, nullable) dispatch_block_t onScrimPress;
 @end
@@ -184,7 +183,6 @@ static NSString *RNSideDrawerHapticValue(RNSideDrawerViewGestureReleaseHaptic va
 #pragma clang diagnostic pop
 
 @end
-
 
 @interface RNSideDrawerViewComponentView : RCTViewComponentView <RCTRNSideDrawerViewViewProtocol>
 @end
@@ -372,7 +370,6 @@ static NSString *RNSideDrawerHapticValue(RNSideDrawerViewGestureReleaseHaptic va
 
 #endif
 
-
 @interface RNSideDrawerPanelViewManager : RCTViewManager
 @end
 
@@ -387,7 +384,6 @@ RCT_EXPORT_MODULE(RNSideDrawerPanelView)
 
 @end
 
-
 @interface RNSideDrawerContentViewManager : RCTViewManager
 @end
 
@@ -401,7 +397,6 @@ RCT_EXPORT_MODULE(RNSideDrawerContentView)
 }
 
 @end
-
 
 @interface RNSideDrawerViewManager : RCTViewManager
 @end

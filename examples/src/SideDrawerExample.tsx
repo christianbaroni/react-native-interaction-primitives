@@ -104,7 +104,7 @@ export function SideDrawerExample({ navigation }: { navigation: React.ReactNode 
   const interaction = React.useMemo<SideDrawerInteraction>(() => ({ spring }), [spring]);
   const dampingRatio = spring.damping / (2 * Math.sqrt(spring.stiffness * spring.mass));
   const naturalFrequency = Math.sqrt(spring.stiffness / spring.mass) / (2 * Math.PI);
-  const regime = Math.abs(dampingRatio - 1) < 0.01 ? 'Critical' : dampingRatio < 1 ? 'Underdamped' : 'Overdamped';
+  const springResponse = Math.abs(dampingRatio - 1) < 0.01 ? 'Critical' : dampingRatio < 1 ? 'Underdamped' : 'Overdamped';
 
   const changeSpring = React.useCallback((key: keyof SpringSettings, value: number) => {
     setSpring(current => ({ ...current, [key]: value }));
@@ -189,7 +189,7 @@ export function SideDrawerExample({ navigation }: { navigation: React.ReactNode 
             <View style={styles.metric}>
               <Text style={styles.metricLabel}>RESPONSE</Text>
               <Text adjustsFontSizeToFit minimumFontScale={0.76} numberOfLines={1} style={styles.metricValue}>
-                {regime}
+                {springResponse}
               </Text>
             </View>
             <View style={styles.metricDivider} />

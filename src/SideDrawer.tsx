@@ -45,8 +45,8 @@ function requireUnitInterval(value: number, name: string): void {
 
 function requireFiniteSpringDynamics(mass: number, stiffness: number, damping: number): void {
   const frequencySquared = stiffness / mass;
-  const decayRate = mass > 1 ? damping / mass / 2 : damping / 2 / mass;
-  if (!Number.isFinite(frequencySquared) || frequencySquared <= 0 || !Number.isFinite(decayRate) || decayRate <= 0) {
+  const dampingRate = damping / 2 / mass;
+  if (!Number.isFinite(frequencySquared) || frequencySquared <= 0 || !Number.isFinite(dampingRate) || dampingRate <= 0) {
     throw new RangeError('interaction.spring must produce finite positive frequency and damping.');
   }
 }

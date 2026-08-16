@@ -88,7 +88,7 @@ private class RNSideDrawerScrimView(context: Context) : View(context), ReactPoin
     override fun hasOverlappingRendering(): Boolean = false
 }
 
-private class RNSideDrawerShadowView(context: Context) : View(context) {
+private class RNSideDrawerShadowCasterView(context: Context) : View(context) {
     private val cornerRadii = FloatArray(8)
     private val shadowPath = Path()
     private val shadowRect = RectF()
@@ -168,7 +168,7 @@ private class RNSideDrawerShadowView(context: Context) : View(context) {
 internal class RNSideDrawerContentPresentationView(context: Context) : FrameLayout(context) {
     private val resolvedCornerRadii = FloatArray(8)
     private val screenCornerRadii = FloatArray(4)
-    private val shadow = RNSideDrawerShadowView(context)
+    private val shadowCaster = RNSideDrawerShadowCasterView(context)
     private var content: RNSideDrawerContentView? = null
     private var shadowElevationPx = 0f
 
@@ -184,7 +184,7 @@ internal class RNSideDrawerContentPresentationView(context: Context) : FrameLayo
         clipToPadding = false
         importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
         isClickable = false
-        super.addView(shadow, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+        super.addView(shadowCaster, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
     }
 
     override fun onAttachedToWindow() {
@@ -225,19 +225,19 @@ internal class RNSideDrawerContentPresentationView(context: Context) : FrameLayo
     }
 
     fun setShadowColor(color: Int) {
-        shadow.setColor(color)
+        shadowCaster.setColor(color)
     }
 
     fun setShadowElevation(elevationPx: Float) {
         val value = if (elevationPx.isFinite()) elevationPx.coerceAtLeast(0f) else 0f
         if (shadowElevationPx == value) return
         shadowElevationPx = value
-        shadow.elevation = value
+        shadowCaster.elevation = value
         content?.elevation = value
     }
 
     fun setShadowOpacity(opacity: Float) {
-        shadow.setMotionOpacity(opacity)
+        shadowCaster.setMotionOpacity(opacity)
     }
 
     private fun updateCornerRadii() {
@@ -269,7 +269,7 @@ internal class RNSideDrawerContentPresentationView(context: Context) : FrameLayo
         resolvedCornerRadii[5] = bottomRight * scale
         resolvedCornerRadii[6] = bottomLeft * scale
         resolvedCornerRadii[7] = bottomLeft * scale
-        shadow.setCornerRadii(resolvedCornerRadii)
+        shadowCaster.setCornerRadii(resolvedCornerRadii)
         content?.setCornerRadii(resolvedCornerRadii)
     }
 }

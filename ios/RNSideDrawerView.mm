@@ -162,6 +162,8 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
   }
 }
 
+#pragma mark - Lifecycle
+
 - (instancetype)initWithFrame:(CGRect)frame
 {
   if ((self = [super initWithFrame:frame])) {
@@ -340,6 +342,8 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
     [self updateContentShadowColor];
   }
 }
+
+#pragma mark - Properties
 
 - (void)setContentBorderColor:(UIColor *)contentBorderColor
 {
@@ -567,6 +571,8 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
   [self setNeedsLayout];
 }
 
+#pragma mark - Slots
+
 - (void)mountSlot:(UIView *)slot atIndex:(NSInteger)index
 {
   NSUInteger boundedIndex = MIN((NSUInteger)MAX(index, 0), _slots.count);
@@ -621,6 +627,8 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
 {
 }
 #pragma clang diagnostic pop
+
+#pragma mark - Commands and settling
 
 - (void)openAnimated:(BOOL)animated
 {
@@ -798,6 +806,8 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
   [self emitOpenChangeIfNeeded];
 }
 
+#pragma mark - Removal
+
 - (void)prepareForRemoval
 {
   [self stopSettleAtCurrentPosition];
@@ -816,6 +826,8 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
   _progressSnapshotPending = NO;
   _suppressCurrentDragRelease = NO;
 }
+
+#pragma mark - Gesture ownership
 
 - (BOOL)canBeginPanWithVelocity:(CGPoint)velocity
 {
@@ -976,6 +988,8 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
   [self applyPresentationAtProgress:[self revealProgress]];
   [self publishProgress];
 }
+
+#pragma mark - Presentation
 
 - (NSInteger)resolvedOpeningDirection
 {
@@ -1184,6 +1198,8 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
   _contentPresentationView.layer.shadowColor = (_contentShadowRadius > 0 ? resolvedColor : UIColor.clearColor).CGColor;
 }
 
+#pragma mark - Settling observation
+
 - (void)advanceSettleToTime:(CFTimeInterval)time
 {
   if (!_settleActive || time <= _lastSettleTime) return;
@@ -1259,6 +1275,8 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
   }
   [self publishProgressForReveal:reveal];
 }
+
+#pragma mark - Events
 
 - (NSString *)phaseName
 {

@@ -54,7 +54,7 @@ private val DEFAULT_SIDE_DRAWER_SPRING = SideDrawerSpring(
     DEFAULT_SIDE_DRAWER_SPRING_STIFFNESS,
     DEFAULT_SIDE_DRAWER_SPRING_DAMPING,
     DEFAULT_SIDE_DRAWER_SPRING_STIFFNESS / DEFAULT_SIDE_DRAWER_SPRING_MASS,
-    DEFAULT_SIDE_DRAWER_SPRING_DAMPING / (2.0 * DEFAULT_SIDE_DRAWER_SPRING_MASS),
+    (DEFAULT_SIDE_DRAWER_SPRING_DAMPING / 2.0) / DEFAULT_SIDE_DRAWER_SPRING_MASS,
     0.0,
     SideDrawerDampingType.CriticallyDamped,
 )
@@ -80,7 +80,7 @@ internal fun resolveSideDrawerSpring(mass: Double, stiffness: Double, damping: D
         DEFAULT_SIDE_DRAWER_SPRING_DAMPING
     }
     val naturalFrequencySquared = resolvedStiffness / resolvedMass
-    val dampingRate = resolvedDamping / (2.0 * resolvedMass)
+    val dampingRate = (resolvedDamping / 2.0) / resolvedMass
     if (!naturalFrequencySquared.isFinite() || naturalFrequencySquared <= 0.0 ||
         !dampingRate.isFinite() || dampingRate <= 0.0
     ) {

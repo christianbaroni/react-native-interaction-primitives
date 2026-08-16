@@ -4,7 +4,7 @@
 
 namespace rnsidedrawer {
 
-Motion compileMotion(NSArray<NSNumber *> *configuration) noexcept
+Motion compileMotion(NSArray<NSNumber *> *configuration)
 {
   Motion motion;
   const std::size_t channelCount = static_cast<std::size_t>(MotionChannel::Count);
@@ -21,8 +21,8 @@ Motion compileMotion(NSArray<NSNumber *> *configuration) noexcept
     }
     if (pointCount == 0) continue;
 
+    motion.hasInterpolations_ = true;
     Motion::Interpolation &interpolation = motion.interpolations_[channelIndex];
-    interpolation.enabled = true;
     interpolation.firstInput = configuration[cursor].doubleValue;
     interpolation.firstOutput = configuration[cursor + 1].doubleValue;
     interpolation.lastInput = interpolation.firstInput;
