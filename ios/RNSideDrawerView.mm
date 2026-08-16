@@ -500,22 +500,19 @@ static RNSideDrawerMotion RNSideDrawerCompileMotion(NSArray<NSNumber *> *config)
 
 - (void)setMotionConfig:(NSArray<NSNumber *> *)motionConfig
 {
-  BOOL resumeSettling = _hasLaidOut && _phase == RNSideDrawerPhaseSettling;
-  BOOL resumePaused = _settlePausedForTracking;
-  BOOL targetOpen = _targetOpen;
-  CGFloat velocity = resumeSettling ? [self stopSettleAtCurrentPosition] : 0;
   _motionConfig = [motionConfig copy];
   _motion = RNSideDrawerCompileMotion(_motionConfig);
-  if (_hasLaidOut) [self applyProgress:[self progress]];
-  if (!resumeSettling) return;
-  if (resumePaused) {
-    _settleActive = YES;
-    _settlePausedForTracking = YES;
-    _settleVelocity = 0;
-    [self startSettleDisplayLink];
+  if (!_hasLaidOut) return;
+  if (_phase == RNSideDrawerPhaseSettling) {
+    CGFloat reveal = [self presentationReveal];
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    [self applyMotionProgress:RNSideDrawerClamp(reveal / MAX(_laidOutDrawerWidth, 1), 0, 1)];
+    [CATransaction commit];
   } else {
-    [self startSettleToOpen:targetOpen revealVelocity:velocity];
+    [self applyProgress:[self progress]];
   }
+  [self updateSettleDisplayLink];
 }
 
 - (void)setProgressEventsEnabled:(BOOL)progressEventsEnabled
@@ -620,6 +617,8 @@ static RNSideDrawerMotion RNSideDrawerCompileMotion(NSArray<NSNumber *> *config)
     [self emitOpenChangeIfNeeded];
     return;
   }
+  if ((_phase == RNSideDrawerPhaseOpen && open) || (_phase == RNSideDrawerPhaseClosed && !open)) return;
+  if (animated && _phase == RNSideDrawerPhaseSettling && _targetOpen == open) return;
   CGFloat revealVelocity = _phase == RNSideDrawerPhaseSettling ? [self stopSettleAtCurrentPosition] : 0;
   _targetOpen = open;
   _settlingSource = source;

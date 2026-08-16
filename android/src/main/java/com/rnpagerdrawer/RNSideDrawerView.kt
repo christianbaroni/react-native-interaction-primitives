@@ -451,6 +451,8 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
             emitOpenChangeIfNeeded()
             return
         }
+        if ((phase == Phase.Open && nextOpen) || (phase == Phase.Closed && !nextOpen)) return
+        if (animated && phase == Phase.Settling && targetOpen == nextOpen) return
         if (phase == Phase.Settling) synchronizeSettleFrame()
         val initialVelocity = if (phase == Phase.Settling) settleVelocityPxPerSecond else 0f
         stopSettleFrames()
