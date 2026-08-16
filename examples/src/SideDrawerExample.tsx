@@ -1,9 +1,68 @@
 import * as React from 'react';
-import { Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { SideDrawer, type SideDrawerMotion, type SideDrawerRef } from 'react-native-pager-drawer';
+import { SideDrawer, type SideDrawerInteraction, type SideDrawerMotion, type SideDrawerRef } from 'react-native-pager-drawer';
 
 const MENU_ITEMS = ['Library', 'Projects', 'Scheduled', 'Remote', 'Settings'] as const;
+
+type SpringSettings = Readonly<{
+  mass: number;
+  stiffness: number;
+  damping: number;
+}>;
+
+type SpringControl = Readonly<{
+  key: keyof SpringSettings;
+  label: string;
+  hint: string;
+  minimum: number;
+  maximum: number;
+  step: number;
+  fractionDigits: number;
+}>;
+
+const DEFAULT_SPRING: SpringSettings = {
+  mass: 1,
+  stiffness: (7 * Math.PI) ** 2,
+  damping: 14 * Math.PI,
+};
+
+const SPRING_PRESETS = [
+  { label: 'Default', spring: DEFAULT_SPRING },
+  { label: 'Crisp', spring: { mass: 0.8, stiffness: 620, damping: 42 } },
+  { label: 'Weighty', spring: { mass: 1.8, stiffness: 500, damping: 58 } },
+  { label: 'Bounce', spring: { mass: 1, stiffness: 420, damping: 22 } },
+] as const satisfies readonly Readonly<{ label: string; spring: SpringSettings }>[];
+
+const SPRING_CONTROLS: readonly SpringControl[] = [
+  {
+    key: 'mass',
+    label: 'Mass',
+    hint: 'Inertia carried through the settle',
+    minimum: 0.2,
+    maximum: 3,
+    step: 0.1,
+    fractionDigits: 1,
+  },
+  {
+    key: 'stiffness',
+    label: 'Stiffness',
+    hint: 'Force pulling toward the endpoint',
+    minimum: 100,
+    maximum: 900,
+    step: 25,
+    fractionDigits: 1,
+  },
+  {
+    key: 'damping',
+    label: 'Damping',
+    hint: 'Energy removed from the spring',
+    minimum: 4,
+    maximum: 100,
+    step: 2,
+    fractionDigits: 1,
+  },
+];
 
 const DRAWER_MOTION: SideDrawerMotion = {
   content: {
@@ -33,7 +92,16 @@ export function SideDrawerExample({ navigation }: { navigation: React.ReactNode 
   const insets = useSafeAreaInsets();
   const [open, setOpen] = React.useState(false);
   const [selectedItem, setSelectedItem] = React.useState<(typeof MENU_ITEMS)[number]>('Library');
+  const [spring, setSpring] = React.useState<SpringSettings>(DEFAULT_SPRING);
   const drawerWidth = Math.min(360, width * 0.76);
+  const interaction = React.useMemo<SideDrawerInteraction>(() => ({ spring }), [spring]);
+  const dampingRatio = spring.damping / (2 * Math.sqrt(spring.stiffness * spring.mass));
+  const naturalFrequency = Math.sqrt(spring.stiffness / spring.mass) / (2 * Math.PI);
+  const regime = Math.abs(dampingRatio - 1) < 0.01 ? 'Critical' : dampingRatio < 1 ? 'Underdamped' : 'Overdamped';
+
+  const changeSpring = React.useCallback((key: keyof SpringSettings, value: number) => {
+    setSpring(current => ({ ...current, [key]: value }));
+  }, []);
 
   return (
     <SideDrawer
@@ -62,6 +130,7 @@ export function SideDrawerExample({ navigation }: { navigation: React.ReactNode 
       }
       drawerWidth={drawerWidth}
       gestureReleaseHaptic="selection"
+      interaction={interaction}
       motion={DRAWER_MOTION}
       onOpenChange={setOpen}
       ref={drawerRef}
@@ -69,27 +138,172 @@ export function SideDrawerExample({ navigation }: { navigation: React.ReactNode 
     >
       <View style={styles.content}>
         <View style={[styles.contentHeader, { paddingTop: insets.top + 14 }]}>{navigation}</View>
-        <View style={[styles.contentBody, { paddingBottom: Math.max(24, insets.bottom + 12) }]}>
+        <ScrollView
+          contentContainerStyle={[styles.contentBody, { paddingBottom: Math.max(32, insets.bottom + 20) }]}
+          showsVerticalScrollIndicator={false}
+        >
           <View>
-            <Text style={styles.kicker}>UNDERLAY COMPOSITION</Text>
-            <Text style={styles.heading}>Side drawer</Text>
+            <Text style={styles.kicker}>NATIVE INTERACTION LAB</Text>
+            <Text style={styles.heading}>Tune the spring</Text>
             <Text style={styles.detail}>
-              The application surface moves. The drawer stays fixed underneath and receives input only where it is revealed.
+              Change the physical parameters, then open, fling, reverse, or interrupt the drawer. Every settle remains native.
             </Text>
           </View>
 
-          <View style={styles.card}>
-            <Text style={styles.cardLabel}>NATIVE MOTION</Text>
-            <Text style={styles.cardTitle}>Fling, interrupt, reverse.</Text>
-            <Text style={styles.cardBody}>No JavaScript or Reanimated frame loop participates in the gesture or settle.</Text>
+          <View style={styles.metricsCard}>
+            <View style={styles.metric}>
+              <Text style={styles.metricLabel}>RESPONSE</Text>
+              <Text adjustsFontSizeToFit minimumFontScale={0.76} numberOfLines={1} style={styles.metricValue}>
+                {regime}
+              </Text>
+            </View>
+            <View style={styles.metricDivider} />
+            <View style={styles.metric}>
+              <Text style={styles.metricLabel}>DAMPING RATIO</Text>
+              <Text adjustsFontSizeToFit minimumFontScale={0.76} numberOfLines={1} style={styles.metricValue}>
+                {dampingRatio.toFixed(2)}
+              </Text>
+            </View>
+            <View style={styles.metricDivider} />
+            <View style={styles.metric}>
+              <Text style={styles.metricLabel}>FREQUENCY</Text>
+              <Text adjustsFontSizeToFit minimumFontScale={0.76} numberOfLines={1} style={styles.metricValue}>
+                {naturalFrequency.toFixed(1)} Hz
+              </Text>
+            </View>
           </View>
 
-          <Pressable onPress={() => drawerRef.current?.toggle()} style={styles.openButton}>
-            <Text style={styles.openButtonText}>{open ? 'Close drawer' : 'Open drawer'}</Text>
+          <View style={styles.card}>
+            <View style={styles.cardHeader}>
+              <View style={styles.cardHeaderCopy}>
+                <Text style={styles.cardLabel}>SPRING PARAMETERS</Text>
+                <Text style={styles.cardTitle}>Live native tuning</Text>
+              </View>
+              <Text style={styles.drawerState}>{open ? 'OPEN' : 'CLOSED'}</Text>
+            </View>
+
+            <View style={styles.presets}>
+              {SPRING_PRESETS.map(preset => {
+                const selected = springsEqual(spring, preset.spring);
+                return (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityState={{ selected }}
+                    key={preset.label}
+                    onPress={() => setSpring(preset.spring)}
+                    style={({ pressed }) => [styles.preset, selected && styles.presetSelected, pressed && styles.controlPressed]}
+                  >
+                    <Text style={[styles.presetLabel, selected && styles.presetLabelSelected]}>{preset.label}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+
+            <View style={styles.parameters}>
+              {SPRING_CONTROLS.map(control => (
+                <SpringParameterControl
+                  control={control}
+                  key={control.key}
+                  onChange={value => changeSpring(control.key, value)}
+                  value={spring[control.key]}
+                />
+              ))}
+            </View>
+
+            <Text style={styles.cardBody}>
+              Changes are captured by the next gesture or command; an active interaction is never retuned mid-flight.
+            </Text>
+          </View>
+
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => drawerRef.current?.toggle()}
+            style={({ pressed }) => [styles.openButton, pressed && styles.openButtonPressed]}
+          >
+            <Text style={styles.openButtonText}>{open ? 'Close and test again' : 'Open with these settings'}</Text>
           </Pressable>
-        </View>
+        </ScrollView>
       </View>
     </SideDrawer>
+  );
+}
+
+function springsEqual(left: SpringSettings, right: SpringSettings): boolean {
+  return (
+    Math.abs(left.mass - right.mass) < 0.001 &&
+    Math.abs(left.stiffness - right.stiffness) < 0.001 &&
+    Math.abs(left.damping - right.damping) < 0.001
+  );
+}
+
+function SpringParameterControl({
+  control,
+  onChange,
+  value,
+}: {
+  control: SpringControl;
+  onChange(value: number): void;
+  value: number;
+}): React.JSX.Element {
+  const decreaseDisabled = value <= control.minimum;
+  const increaseDisabled = value >= control.maximum;
+  const formattedValue = value.toFixed(control.fractionDigits);
+  const update = (delta: number) => {
+    const nextValue = Math.min(control.maximum, Math.max(control.minimum, value + delta));
+    onChange(Math.round(nextValue * 1000) / 1000);
+  };
+
+  return (
+    <View style={styles.parameter}>
+      <View style={styles.parameterCopy}>
+        <Text style={styles.parameterLabel}>{control.label}</Text>
+        <Text style={styles.parameterHint}>{control.hint}</Text>
+      </View>
+      <View style={styles.stepper}>
+        <StepperButton
+          accessibilityLabel={`Decrease ${control.label.toLowerCase()}, current value ${formattedValue}`}
+          disabled={decreaseDisabled}
+          label="−"
+          onPress={() => update(-control.step)}
+        />
+        <Text style={styles.parameterValue}>{formattedValue}</Text>
+        <StepperButton
+          accessibilityLabel={`Increase ${control.label.toLowerCase()}, current value ${formattedValue}`}
+          disabled={increaseDisabled}
+          label="+"
+          onPress={() => update(control.step)}
+        />
+      </View>
+    </View>
+  );
+}
+
+function StepperButton({
+  accessibilityLabel,
+  disabled,
+  label,
+  onPress,
+}: {
+  accessibilityLabel: string;
+  disabled: boolean;
+  label: string;
+  onPress(): void;
+}): React.JSX.Element {
+  return (
+    <Pressable
+      accessibilityLabel={accessibilityLabel}
+      accessibilityRole="button"
+      accessibilityState={{ disabled }}
+      disabled={disabled}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.stepperButton,
+        disabled && styles.stepperButtonDisabled,
+        pressed && !disabled && styles.controlPressed,
+      ]}
+    >
+      <Text style={styles.stepperButtonLabel}>{label}</Text>
+    </Pressable>
   );
 }
 
@@ -99,13 +313,20 @@ const styles = StyleSheet.create({
     borderColor: '#D8DDE5',
     borderRadius: 24,
     borderWidth: 1,
-    padding: 24,
+    padding: 20,
   },
   cardBody: {
     color: '#67717E',
-    fontSize: 15,
-    lineHeight: 22,
-    marginTop: 10,
+    fontSize: 13,
+    lineHeight: 19,
+    marginTop: 18,
+  },
+  cardHeader: {
+    alignItems: 'flex-start',
+    flexDirection: 'row',
+  },
+  cardHeaderCopy: {
+    flex: 1,
   },
   cardLabel: {
     color: '#52606F',
@@ -115,10 +336,10 @@ const styles = StyleSheet.create({
   },
   cardTitle: {
     color: '#151A20',
-    fontSize: 26,
+    fontSize: 24,
     fontWeight: '700',
     letterSpacing: -0.6,
-    marginTop: 10,
+    marginTop: 6,
   },
   content: {
     backgroundColor: '#0D1014',
@@ -126,10 +347,10 @@ const styles = StyleSheet.create({
   },
   contentBody: {
     backgroundColor: '#F2F5F8',
-    flex: 1,
-    justifyContent: 'space-between',
+    flexGrow: 1,
+    gap: 20,
     padding: 24,
-    paddingTop: 40,
+    paddingTop: 32,
   },
   contentHeader: {
     paddingBottom: 10,
@@ -140,7 +361,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     lineHeight: 23,
     marginTop: 12,
-    maxWidth: 360,
+    maxWidth: 380,
   },
   drawer: {
     backgroundColor: '#0D1014',
@@ -161,7 +382,7 @@ const styles = StyleSheet.create({
   },
   heading: {
     color: '#151A20',
-    fontSize: 38,
+    fontSize: 36,
     fontWeight: '700',
     letterSpacing: -1.2,
     marginTop: 8,
@@ -200,11 +421,21 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '600',
   },
+  metric: {
+    flex: 1,
+    minWidth: 0,
+  },
   openButton: {
     alignItems: 'center',
     backgroundColor: '#1769E0',
     borderRadius: 18,
-    paddingVertical: 16,
+    minHeight: 56,
+    justifyContent: 'center',
+    paddingHorizontal: 20,
+  },
+  openButtonPressed: {
+    opacity: 0.9,
+    transform: [{ scale: 0.96 }],
   },
   openButtonText: {
     color: '#FFFFFF',
@@ -213,5 +444,125 @@ const styles = StyleSheet.create({
   },
   root: {
     flex: 1,
+  },
+  controlPressed: {
+    opacity: 0.82,
+    transform: [{ scale: 0.96 }],
+  },
+  drawerState: {
+    backgroundColor: '#EDF2F7',
+    borderRadius: 10,
+    color: '#52606F',
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.9,
+    overflow: 'hidden',
+    paddingHorizontal: 9,
+    paddingVertical: 7,
+  },
+  metricDivider: {
+    alignSelf: 'stretch',
+    backgroundColor: '#D9E0E8',
+    width: StyleSheet.hairlineWidth,
+  },
+  metricLabel: {
+    color: '#7A8491',
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 0.8,
+  },
+  metricsCard: {
+    backgroundColor: '#E7ECF2',
+    borderRadius: 18,
+    flexDirection: 'row',
+    gap: 14,
+    justifyContent: 'space-between',
+    paddingHorizontal: 18,
+    paddingVertical: 16,
+  },
+  metricValue: {
+    color: '#1C2632',
+    fontSize: 14,
+    fontVariant: ['tabular-nums'],
+    fontWeight: '700',
+    marginTop: 5,
+  },
+  parameter: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 12,
+    minHeight: 66,
+  },
+  parameterCopy: {
+    flex: 1,
+  },
+  parameterHint: {
+    color: '#7B8591',
+    fontSize: 11,
+    lineHeight: 15,
+    marginTop: 3,
+  },
+  parameterLabel: {
+    color: '#1B222B',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  parameters: {
+    marginTop: 12,
+  },
+  parameterValue: {
+    color: '#1B222B',
+    fontSize: 14,
+    fontVariant: ['tabular-nums'],
+    fontWeight: '700',
+    minWidth: 52,
+    textAlign: 'center',
+  },
+  preset: {
+    alignItems: 'center',
+    backgroundColor: '#EDF1F5',
+    borderRadius: 12,
+    justifyContent: 'center',
+    minHeight: 44,
+    paddingHorizontal: 13,
+  },
+  presetLabel: {
+    color: '#586473',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  presetLabelSelected: {
+    color: '#FFFFFF',
+  },
+  presets: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 18,
+  },
+  presetSelected: {
+    backgroundColor: '#1769E0',
+  },
+  stepper: {
+    alignItems: 'center',
+    backgroundColor: '#EDF1F5',
+    borderRadius: 14,
+    flexDirection: 'row',
+    overflow: 'hidden',
+  },
+  stepperButton: {
+    alignItems: 'center',
+    height: 44,
+    justifyContent: 'center',
+    width: 44,
+  },
+  stepperButtonDisabled: {
+    opacity: 0.24,
+  },
+  stepperButtonLabel: {
+    color: '#27313D',
+    fontSize: 20,
+    fontWeight: '500',
+    marginTop: -1,
   },
 });
