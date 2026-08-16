@@ -1,7 +1,7 @@
 #import "RNSideDrawerView.h"
 
 #import "RNSideDrawerContentView.h"
-#import "RNNestedScrollView.h"
+#import "RNSideDrawerGestureScrollView.h"
 #import "RNSideDrawerInteraction.h"
 #import "RNSideDrawerMotion.h"
 #import "RNSideDrawerPanelView.h"
@@ -94,7 +94,7 @@ typedef NS_ENUM(NSInteger, RNSideDrawerSettlingSource) {
 @end
 
 @implementation RNSideDrawerView {
-  RNNestedScrollView *_scrollView;
+  RNSideDrawerGestureScrollView *_scrollView;
   UIView *_contactBackingView;
   RNSideDrawerContentPresentationView *_contentPresentationView;
   UIView *_contentHostView;
@@ -187,8 +187,7 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
     _openingDirection = 1;
     _slots = [NSMutableArray arrayWithCapacity:2];
 
-    _scrollView = [[RNNestedScrollView alloc] initWithFrame:self.bounds];
-    _scrollView.scrollAxis = RNScrollAxisHorizontal;
+    _scrollView = [[RNSideDrawerGestureScrollView alloc] initWithFrame:self.bounds];
     _scrollView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     _scrollView.backgroundColor = UIColor.clearColor;
     _scrollView.alwaysBounceHorizontal = NO;
@@ -207,7 +206,7 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
     _scrollView.didBeginContact = ^{
       [weakSelf handleContactBegin];
     };
-    _scrollView.canBeginPan = ^BOOL(CGPoint velocity) {
+    _scrollView.canBeginDrawerPan = ^BOOL(CGPoint velocity) {
       RNSideDrawerView *strongSelf = weakSelf;
       return strongSelf != nil && [strongSelf canBeginPanWithVelocity:velocity];
     };
