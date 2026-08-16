@@ -100,8 +100,6 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
     private var lastPointerX = 0f
     private var dragStartRawRevealPx = 0f
     private var dragRawRevealPx = 0f
-    private var dragLowerBoundPx = 0f
-    private var dragHasReachedNonnegative = true
     private var settleStartTimeNanos = 0L
     private var settleStartRevealPx = 0f
     private var settleInitialVelocityPxPerSecond = 0f
@@ -239,12 +237,7 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
         val resumeSource = settlingSource
         val previousDrawerWidth = laidOutDrawerWidthPx
         val previousReveal = revealPx
-        val dragLowerBound = if (dragHasReachedNonnegative) 0f else dragLowerBoundPx
-        val hiddenLowerTravel = if (phase == Phase.Dragging) {
-            minOf(0f, dragRawRevealPx - dragLowerBound)
-        } else {
-            0f
-        }
+        val previousRawReveal = dragRawRevealPx
         stopSettleFrames()
 
         laidOutDrawerWidthPx = drawerWidthPx
@@ -262,7 +255,15 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
             else -> 0f
         }
         if (phase == Phase.Dragging) {
-            reanchorDrag(lastPointerX, directRawReveal(revealPx) + hiddenLowerTravel)
+            val remappedRawReveal = when {
+                previousRawReveal < 0f -> previousRawReveal
+                previousRawReveal > previousDrawerWidth ->
+                    laidOutDrawerWidthPx + previousRawReveal - previousDrawerWidth
+                previousDrawerWidth > 0f -> previousRawReveal / previousDrawerWidth * laidOutDrawerWidthPx
+                else -> directRawReveal(revealPx)
+            }
+            reanchorDrag(lastPointerX, remappedRawReveal)
+            revealPx = directReveal(remappedRawReveal)
         }
         applyProgress()
 
@@ -653,8 +654,6 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
     }
 
     private fun startDragMapping(currentX: Float) {
-        dragLowerBoundPx = minOf(revealPx, 0f)
-        dragHasReachedNonnegative = revealPx >= 0f
         reanchorDrag(currentX, directRawReveal(revealPx))
     }
 
@@ -681,13 +680,7 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
 
     private fun setDragRawRevealPx(value: Float) {
         dragRawRevealPx = value
-        var presentedRawReveal = value
-        if (!dragHasReachedNonnegative) {
-            presentedRawReveal = max(dragLowerBoundPx, presentedRawReveal)
-            if (presentedRawReveal >= 0f) dragHasReachedNonnegative = true
-        }
-        if (dragHasReachedNonnegative) presentedRawReveal = max(0f, presentedRawReveal)
-        revealPx = if (presentedRawReveal < 0f) presentedRawReveal else directReveal(presentedRawReveal)
+        revealPx = directReveal(value)
         applyProgress()
     }
 
@@ -697,28 +690,28 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
     }
 
     private fun directReveal(rawReveal: Float): Float {
-        if (rawReveal <= laidOutDrawerWidthPx) return max(0f, rawReveal)
         val limit = overtravelLimitPx()
+        if (rawReveal < 0f) return limit * tanh(rawReveal / limit)
+        if (rawReveal <= laidOutDrawerWidthPx) return rawReveal
         return laidOutDrawerWidthPx + limit * tanh((rawReveal - laidOutDrawerWidthPx) / limit)
     }
 
     private fun directRawReveal(presentationReveal: Float): Float {
-        if (presentationReveal <= laidOutDrawerWidthPx) return presentationReveal
         val limit = overtravelLimitPx()
+        if (presentationReveal < 0f) {
+            val normalized = (presentationReveal / limit).coerceIn(-1f + 1e-6f, 0f)
+            return limit * 0.5f * ln((1f + normalized) / (1f - normalized))
+        }
+        if (presentationReveal <= laidOutDrawerWidthPx) return presentationReveal
         val normalized = ((presentationReveal - laidOutDrawerWidthPx) / limit).coerceIn(0f, 1f - 1e-6f)
         return laidOutDrawerWidthPx + limit * 0.5f * ln((1f + normalized) / (1f - normalized))
     }
 
     private fun releaseRevealVelocity(velocityPxPerSecond: Float): Float {
         if (!velocityPxPerSecond.isFinite()) return 0f
-        val lowerBound = if (dragHasReachedNonnegative) 0f else dragLowerBoundPx
-        if (dragRawRevealPx < lowerBound ||
-            (dragRawRevealPx <= lowerBound && velocityPxPerSecond < 0f)
-        ) {
-            return 0f
-        }
-        if (dragRawRevealPx <= laidOutDrawerWidthPx) return velocityPxPerSecond
-        val normalized = tanh((dragRawRevealPx - laidOutDrawerWidthPx) / overtravelLimitPx())
+        if (dragRawRevealPx in 0f..laidOutDrawerWidthPx) return velocityPxPerSecond
+        val boundary = if (dragRawRevealPx < 0f) 0f else laidOutDrawerWidthPx
+        val normalized = tanh((dragRawRevealPx - boundary) / overtravelLimitPx())
         return velocityPxPerSecond * (1f - normalized * normalized)
     }
 
