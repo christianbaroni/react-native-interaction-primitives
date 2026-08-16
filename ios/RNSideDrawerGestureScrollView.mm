@@ -52,7 +52,16 @@ bool touchedDescendantCanScrollHorizontally(
   return false;
 }
 
-void cancelTouchedHorizontalScrollPans(UIView *touchedView, UIScrollView *drawerScrollView)
+bool isDescendantScrollViewPan(UIGestureRecognizer *gestureRecognizer, UIScrollView *drawerScrollView)
+{
+  if (![gestureRecognizer.view isKindOfClass:UIScrollView.class]) return false;
+
+  UIScrollView *scrollView = (UIScrollView *)gestureRecognizer.view;
+  return scrollView != drawerScrollView && gestureRecognizer == scrollView.panGestureRecognizer &&
+      [scrollView isDescendantOfView:drawerScrollView];
+}
+
+void cancelTouchedScrollViewPans(UIView *touchedView, UIScrollView *drawerScrollView)
 {
   for (UIView *candidate = touchedView;
        candidate != nil && candidate != drawerScrollView;
@@ -60,9 +69,7 @@ void cancelTouchedHorizontalScrollPans(UIView *touchedView, UIScrollView *drawer
     if (![candidate isKindOfClass:UIScrollView.class]) continue;
 
     UIScrollView *scrollView = (UIScrollView *)candidate;
-    CGFloat minimumOffset;
-    CGFloat maximumOffset;
-    if (!horizontalScrollRange(scrollView, minimumOffset, maximumOffset)) continue;
+    if (!scrollView.scrollEnabled || !scrollView.panGestureRecognizer.enabled) continue;
 
     scrollView.panGestureRecognizer.enabled = NO;
     scrollView.panGestureRecognizer.enabled = YES;
@@ -99,12 +106,25 @@ void cancelTouchedHorizontalScrollPans(UIView *touchedView, UIScrollView *drawer
   const BOOL drawerCanMove = self.canBeginDrawerPan([self.panGestureRecognizer velocityInView:self]);
   const BOOL descendantCanScroll = drawerCanMove &&
       touchedDescendantCanScrollHorizontally(_touchedView, self, self.panGestureRecognizer);
-  if (drawerCanMove && !descendantCanScroll) cancelTouchedHorizontalScrollPans(_touchedView, self);
+  if (drawerCanMove && !descendantCanScroll) cancelTouchedScrollViewPans(_touchedView, self);
 
   _touchedView = nil;
   const BOOL accepted = drawerCanMove && !descendantCanScroll;
   if (!accepted) _reactTouchHandler = nil;
   return accepted;
+}
+
+- (BOOL)gestureRecognizer:(UIGestureRecognizer *)gestureRecognizer
+    shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)otherGestureRecognizer
+{
+  // A decelerating descendant can otherwise prevent the drawer before its direction gate runs.
+  if (gestureRecognizer == self.panGestureRecognizer) {
+    return isDescendantScrollViewPan(otherGestureRecognizer, self);
+  }
+  if (otherGestureRecognizer == self.panGestureRecognizer) {
+    return isDescendantScrollViewPan(gestureRecognizer, self);
+  }
+  return NO;
 }
 
 - (void)cancelReactTouchesForActivePan

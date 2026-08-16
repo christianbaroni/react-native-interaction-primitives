@@ -74,7 +74,7 @@ The target must be an integer within the currently mounted page range. Invalid t
 
 ## Side drawer
 
-`SideDrawer` keeps its drawer slot fixed underneath one moving application surface. Directionally valid horizontal gestures can open or close it from anywhere in the component while taps and cross-axis gestures remain with the touched content. A touched React Native horizontal scroll view receives the gesture while it can scroll in that exact direction; at an exhausted edge, the drawer remains eligible instead of yielding to overscroll.
+`SideDrawer` keeps its drawer slot fixed underneath one moving application surface. Directionally valid horizontal gestures can open or close it from anywhere in the component while taps and cross-axis gestures remain with the touched content. A touched React Native horizontal scroll view receives the gesture while it can scroll in that exact direction; at an exhausted edge, the drawer remains eligible instead of yielding to overscroll. Once the drawer wins, it interrupts momentum in touched vertical scroll content instead of waiting for deceleration to finish.
 
 ```tsx
 import * as React from 'react';
