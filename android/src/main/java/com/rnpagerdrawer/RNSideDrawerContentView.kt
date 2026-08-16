@@ -13,11 +13,13 @@ import android.view.View
 import android.view.ViewOutlineProvider
 import android.view.WindowInsets
 import android.widget.FrameLayout
+import com.facebook.react.uimanager.PointerEvents
+import com.facebook.react.uimanager.ReactPointerEventsView
 import com.facebook.react.uimanager.ThemedReactContext
 import kotlin.math.max
 import kotlin.math.min
 
-private class RNSideDrawerBorderView(context: Context) : View(context) {
+private class RNSideDrawerBorderView(context: Context) : View(context), ReactPointerEventsView {
     private val outerCornerRadii = FloatArray(8)
     private val strokeCornerRadii = FloatArray(8)
     private val strokePath = Path()
@@ -27,6 +29,8 @@ private class RNSideDrawerBorderView(context: Context) : View(context) {
         style = Paint.Style.STROKE
     }
     private var pathDirty = true
+
+    override val pointerEvents: PointerEvents = PointerEvents.NONE
 
     override fun hasOverlappingRendering(): Boolean = false
 
@@ -75,6 +79,13 @@ private class RNSideDrawerBorderView(context: Context) : View(context) {
         strokePath.rewind()
         strokePath.addRoundRect(strokeRect, strokeCornerRadii, Path.Direction.CW)
     }
+}
+
+private class RNSideDrawerScrimView(context: Context) : View(context), ReactPointerEventsView {
+    override val pointerEvents: PointerEvents
+        get() = if (isClickable) PointerEvents.AUTO else PointerEvents.NONE
+
+    override fun hasOverlappingRendering(): Boolean = false
 }
 
 private class RNSideDrawerShadowView(context: Context) : View(context) {
@@ -269,8 +280,7 @@ internal class RNSideDrawerContentView(reactContext: ThemedReactContext) : Frame
     private val cornerRadii = FloatArray(8)
     private var clipPathDirty = true
     private var shouldClipCorners = false
-    private val scrim = View(reactContext).apply {
-        forceHasOverlappingRendering(false)
+    private val scrim = RNSideDrawerScrimView(reactContext).apply {
         isClickable = false
         setBackgroundColor(Color.TRANSPARENT)
         setOnClickListener { onScrimPress?.invoke() }

@@ -13,6 +13,7 @@ import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.ReadableArray
 import com.facebook.react.bridge.WritableMap
 import com.facebook.react.uimanager.ThemedReactContext
+import com.facebook.react.uimanager.TouchTargetHelper
 import com.facebook.react.uimanager.UIManagerHelper
 import kotlin.math.abs
 import kotlin.math.atan2
@@ -117,6 +118,7 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
     private val viewConfiguration = ViewConfiguration.get(reactContext)
     private val touchSlop = viewConfiguration.scaledTouchSlop
     private val maximumFlingVelocity = viewConfiguration.scaledMaximumFlingVelocity
+    private val nativeTouchTarget = IntArray(1)
 
     private var panelView: RNSideDrawerPanelView? = null
     private var contentView: RNSideDrawerContentView? = null
@@ -432,7 +434,12 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
                 val deltaY = event.getY(pointerIndex) - downY
                 val revealDelta = deltaX * revealDirection()
                 val canMove = canMove(revealDelta)
-                if (canMove && abs(deltaX) > touchSlop && abs(deltaX) > abs(deltaY)) {
+                val horizontalIntent = abs(deltaX) > touchSlop && abs(deltaX) > abs(deltaY)
+                if (horizontalIntent && touchedDescendantCanScrollHorizontally(deltaX)) {
+                    yieldGestureToDescendant()
+                    return false
+                }
+                if (canMove && horizontalIntent) {
                     beginDragging(event.getX(pointerIndex))
                     hasDragged = true
                     parent?.requestDisallowInterceptTouchEvent(true)
@@ -845,6 +852,18 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
     private fun yieldGestureToDescendant() {
         gestureEligible = false
         if (descendantRequestedDisallowIntercept) super.requestDisallowInterceptTouchEvent(true)
+    }
+
+    private fun touchedDescendantCanScrollHorizontally(deltaX: Float): Boolean {
+        val scrollDirection = if (deltaX > 0f) -1 else 1
+        nativeTouchTarget[0] = View.NO_ID
+        TouchTargetHelper.findTargetTagForTouch(downX, downY, this, nativeTouchTarget)
+        var view = if (nativeTouchTarget[0] == View.NO_ID) null else findViewById<View>(nativeTouchTarget[0])
+        while (view != null && view !== this) {
+            if (view.canScrollHorizontally(scrollDirection)) return true
+            view = view.parent as? View
+        }
+        return false
     }
 
     private fun revealDirection(): Int {

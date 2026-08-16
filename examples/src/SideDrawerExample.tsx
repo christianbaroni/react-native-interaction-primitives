@@ -5,6 +5,13 @@ import { SideDrawer, type SideDrawerInteraction, type SideDrawerMotion, type Sid
 
 const MENU_ITEMS = ['Library', 'Projects', 'Scheduled', 'Remote', 'Settings'] as const;
 
+const HANDOFF_CARDS = [
+  { accent: '#2563EB', label: 'First edge', detail: 'Swipe right here to open the drawer.' },
+  { accent: '#8B5CF6', label: 'Inner range', detail: 'Horizontal movement stays with this row.' },
+  { accent: '#E8793E', label: 'Still scrolling', detail: 'The drawer remains stationary.' },
+  { accent: '#159A73', label: 'Last edge', detail: 'Swipe left here while open to close.' },
+] as const;
+
 type SpringSettings = Readonly<{
   mass: number;
   stiffness: number;
@@ -140,6 +147,7 @@ export function SideDrawerExample({ navigation }: { navigation: React.ReactNode 
         <View style={[styles.contentHeader, { paddingTop: insets.top + 14 }]}>{navigation}</View>
         <ScrollView
           contentContainerStyle={[styles.contentBody, { paddingBottom: Math.max(32, insets.bottom + 20) }]}
+          directionalLockEnabled
           showsVerticalScrollIndicator={false}
         >
           <View>
@@ -148,6 +156,33 @@ export function SideDrawerExample({ navigation }: { navigation: React.ReactNode 
             <Text style={styles.detail}>
               Change the physical parameters, then open, fling, reverse, or interrupt the drawer. Every settle remains native.
             </Text>
+          </View>
+
+          <View style={styles.handoffSection}>
+            <View style={styles.handoffHeader}>
+              <Text style={styles.handoffTitle}>Nested horizontal scroll</Text>
+              <Text style={styles.handoffBadge}>GESTURE PROBE</Text>
+            </View>
+            <Text style={styles.handoffDetail}>
+              The row owns a drag while it can move in that direction. At an exhausted edge, the drawer stays eligible.
+            </Text>
+            <ScrollView
+              accessibilityLabel="Nested horizontal scroll gesture probe"
+              contentContainerStyle={styles.handoffCards}
+              decelerationRate="fast"
+              directionalLockEnabled
+              horizontal
+              nestedScrollEnabled
+              showsHorizontalScrollIndicator={false}
+            >
+              {HANDOFF_CARDS.map(card => (
+                <View key={card.label} style={styles.handoffCard}>
+                  <View style={[styles.handoffAccent, { backgroundColor: card.accent }]} />
+                  <Text style={styles.handoffCardLabel}>{card.label}</Text>
+                  <Text style={styles.handoffCardDetail}>{card.detail}</Text>
+                </View>
+              ))}
+            </ScrollView>
           </View>
 
           <View style={styles.metricsCard}>
@@ -386,6 +421,63 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: -1.2,
     marginTop: 8,
+  },
+  handoffAccent: {
+    borderRadius: 3,
+    height: 6,
+    width: 36,
+  },
+  handoffBadge: {
+    color: '#657181',
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 0.8,
+  },
+  handoffCard: {
+    backgroundColor: '#FFFFFF',
+    borderColor: '#D8DDE5',
+    borderRadius: 18,
+    borderWidth: 1,
+    minHeight: 126,
+    padding: 16,
+    width: 168,
+  },
+  handoffCardDetail: {
+    color: '#74808E',
+    fontSize: 12,
+    lineHeight: 17,
+    marginTop: 7,
+  },
+  handoffCardLabel: {
+    color: '#1C2530',
+    fontSize: 15,
+    fontWeight: '700',
+    marginTop: 15,
+  },
+  handoffCards: {
+    gap: 10,
+    paddingRight: 4,
+  },
+  handoffDetail: {
+    color: '#697481',
+    fontSize: 13,
+    lineHeight: 19,
+    marginTop: 8,
+  },
+  handoffHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  handoffSection: {
+    backgroundColor: '#E7ECF2',
+    borderRadius: 20,
+    padding: 18,
+  },
+  handoffTitle: {
+    color: '#1B222B',
+    fontSize: 16,
+    fontWeight: '700',
   },
   kicker: {
     color: '#2563EB',

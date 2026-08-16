@@ -127,6 +127,53 @@ static UIGestureRecognizer *RNSideDrawerFindReactTouchHandler(UIView *view)
   return nil;
 }
 
+static BOOL RNSideDrawerHorizontalScrollRange(UIScrollView *scrollView, CGFloat *minimumOffset, CGFloat *maximumOffset)
+{
+  if (!scrollView.scrollEnabled || !scrollView.panGestureRecognizer.enabled) return NO;
+
+  UIEdgeInsets inset = scrollView.adjustedContentInset;
+  *minimumOffset = -inset.left;
+  *maximumOffset = MAX(*minimumOffset, scrollView.contentSize.width - scrollView.bounds.size.width + inset.right);
+  return *maximumOffset > *minimumOffset;
+}
+
+static BOOL RNSideDrawerTouchedDescendantCanScrollHorizontally(
+    UIView *view,
+    UIScrollView *drawerScrollView,
+    UIPanGestureRecognizer *drawerPanGestureRecognizer)
+{
+  for (UIView *candidate = view; candidate != nil && candidate != drawerScrollView; candidate = candidate.superview) {
+    if (![candidate isKindOfClass:UIScrollView.class]) continue;
+    UIScrollView *scrollView = (UIScrollView *)candidate;
+    CGFloat minimumOffset;
+    CGFloat maximumOffset;
+    if (!RNSideDrawerHorizontalScrollRange(scrollView, &minimumOffset, &maximumOffset)) continue;
+
+    CGFloat velocity = [drawerPanGestureRecognizer velocityInView:scrollView].x;
+    if ((velocity > 0 && scrollView.contentOffset.x > minimumOffset) ||
+        (velocity < 0 && scrollView.contentOffset.x < maximumOffset)) {
+      return YES;
+    }
+  }
+  return NO;
+}
+
+static void RNSideDrawerCancelTouchedHorizontalScrollPans(
+    UIView *view,
+    UIScrollView *drawerScrollView)
+{
+  for (UIView *candidate = view; candidate != nil && candidate != drawerScrollView; candidate = candidate.superview) {
+    if (![candidate isKindOfClass:UIScrollView.class]) continue;
+    UIScrollView *scrollView = (UIScrollView *)candidate;
+    CGFloat minimumOffset;
+    CGFloat maximumOffset;
+    if (!RNSideDrawerHorizontalScrollRange(scrollView, &minimumOffset, &maximumOffset)) continue;
+
+    scrollView.panGestureRecognizer.enabled = NO;
+    scrollView.panGestureRecognizer.enabled = YES;
+  }
+}
+
 @interface RNSideDrawerScrollView : UIScrollView
 @property (nonatomic, copy, nullable) void (^didBeginContact)(UIView *view);
 @property (nonatomic, copy, nullable) BOOL (^shouldBeginPan)(CGPoint velocity);
@@ -223,6 +270,7 @@ static UIGestureRecognizer *RNSideDrawerFindReactTouchHandler(UIView *view)
 
 @implementation RNSideDrawerView {
   RNSideDrawerScrollView *_scrollView;
+  __weak UIView *_contactView;
   __weak UIGestureRecognizer *_reactTouchHandler;
   UIView *_contactBackingView;
   RNSideDrawerContentPresentationView *_contentPresentationView;
@@ -1179,6 +1227,7 @@ static RNSideDrawerMotion RNSideDrawerCompileMotion(NSArray<NSNumber *> *config)
 
 - (void)handleContactBeginInView:(UIView *)view
 {
+  _contactView = view;
   _reactTouchHandler = RNSideDrawerFindReactTouchHandler(view);
   [_hapticFeedback prepare];
   [self pauseActiveSettle];
@@ -1222,18 +1271,31 @@ static RNSideDrawerMotion RNSideDrawerCompileMotion(NSArray<NSNumber *> *config)
 
 - (BOOL)shouldBeginPanWithVelocity:(CGPoint)velocity
 {
-  if (!_gestureEnabled || _laidOutDrawerWidth <= 0) return NO;
-  if (fabs(velocity.x) <= fabs(velocity.y)) return NO;
+  if (!_gestureEnabled || _laidOutDrawerWidth <= 0 || fabs(velocity.x) <= fabs(velocity.y)) {
+    _contactView = nil;
+    return NO;
+  }
   CGFloat revealVelocity = velocity.x * _revealDirection;
-  if (_reveal <= 0) return revealVelocity > 0;
-  if (_reveal >= _laidOutDrawerWidth) return revealVelocity < 0;
-  return YES;
+  BOOL drawerCanMove = YES;
+  if (_reveal <= 0) {
+    drawerCanMove = revealVelocity > 0;
+  } else if (_reveal >= _laidOutDrawerWidth) {
+    drawerCanMove = revealVelocity < 0;
+  }
+  BOOL descendantCanScroll = drawerCanMove && RNSideDrawerTouchedDescendantCanScrollHorizontally(
+      _contactView, _scrollView, _scrollView.panGestureRecognizer);
+  if (drawerCanMove && !descendantCanScroll) {
+    RNSideDrawerCancelTouchedHorizontalScrollPans(_contactView, _scrollView);
+  }
+  _contactView = nil;
+  return drawerCanMove && !descendantCanScroll;
 }
 
 - (void)scrollViewWillBeginDragging:(UIScrollView *)scrollView
 {
   (void)scrollView;
   UIGestureRecognizer *reactTouchHandler = _reactTouchHandler;
+  _contactView = nil;
   _reactTouchHandler = nil;
   if (reactTouchHandler.enabled) {
     if ([reactTouchHandler isKindOfClass:RCTTouchHandler.class]) {
