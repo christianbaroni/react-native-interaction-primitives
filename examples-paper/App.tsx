@@ -5,7 +5,7 @@ import { ExampleApp } from '../examples/src/ExampleApp';
 export default function App(): React.JSX.Element {
   return (
     <>
-      <StatusBar backgroundColor="#101318" barStyle="light-content" />
+      <StatusBar barStyle="light-content" />
       <ExampleApp />
     </>
   );

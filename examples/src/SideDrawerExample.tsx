@@ -211,6 +211,7 @@ export function SideDrawerExample({ navigation }: { navigation: React.ReactNode 
           contentContainerStyle={[styles.contentBody, { paddingBottom: Math.max(32, insets.bottom + 20) }]}
           directionalLockEnabled
           showsVerticalScrollIndicator={false}
+          style={styles.contentScroll}
         >
           <View>
             <Text style={styles.kicker}>NATIVE INTERACTION LAB</Text>
@@ -490,6 +491,9 @@ const styles = StyleSheet.create({
   contentHeader: {
     paddingBottom: 10,
     paddingHorizontal: 12,
+  },
+  contentScroll: {
+    flex: 1,
   },
   detail: {
     color: '#697481',
