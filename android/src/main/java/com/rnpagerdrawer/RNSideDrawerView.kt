@@ -39,10 +39,10 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
         Release,
     }
 
-    private val slots = ArrayList<View>(2)
-    private val choreographer = Choreographer.getInstance()
     private val contentPresentationView = RNSideDrawerContentPresentationView(reactContext)
+    private val slots = ArrayList<View>(2)
     private val targetResolverScroller = OverScroller(reactContext)
+    private val choreographer = Choreographer.getInstance()
     private val viewConfiguration = ViewConfiguration.get(reactContext)
     private val touchSlop = viewConfiguration.scaledTouchSlop
     private val maximumFlingVelocity = viewConfiguration.scaledMaximumFlingVelocity
@@ -50,14 +50,22 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
 
     private var panelView: RNSideDrawerPanelView? = null
     private var contentView: RNSideDrawerContentView? = null
+
     private var phase = Phase.Closed
     private var settlingSource = SettlingSource.None
-    private var targetOpen = false
     private var open = false
+    private var targetOpen = false
     private var lastEmittedOpen = false
-    private var revealPx = 0f
-    private var laidOutDrawerWidthPx = 0f
     private var hasLaidOut = false
+    private var progressSnapshotPending = false
+    private var laidOutDrawerWidthPx = 0f
+    private var revealPx = 0f
+
+    private var configuredInteraction = defaultSideDrawerInteraction(defaultOverdragPx())
+    private var activeInteraction = configuredInteraction
+    private var motion = SideDrawerMotion.EMPTY
+    private var overlayColor = Color.TRANSPARENT
+
     private var activePointerId = INVALID_POINTER_ID
     private var gestureEligible = false
     private var descendantRequestedDisallowIntercept = false
@@ -72,21 +80,18 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
     private var unconstrainedDragPositionPx = 0f
     private var dragLowerBoundPx = 0f
     private var dragUpperBoundPx = 0f
+    private var velocityTracker: VelocityTracker? = null
+
     private var settleStartTimeNanos = 0L
-    private var settleStartRevealPx = 0f
+    private var settleStartPositionPx = 0f
     private var settleInitialVelocityPxPerSecond = 0.0
     private var settleVelocityPxPerSecond = 0.0
     private var settleRunning = false
     private var settlePausedForTouch = false
-    private var configuredInteraction = defaultSideDrawerInteraction(defaultOverdragPx())
-    private var activeInteraction = configuredInteraction
     private val settleState = SideDrawerSpringState()
     private val excursionState = SideDrawerSpringState()
+
     private var highFrameRateRequested = false
-    private var progressSnapshotPending = false
-    private var velocityTracker: VelocityTracker? = null
-    private var motion = SideDrawerMotion.EMPTY
-    private var overlayColor = Color.TRANSPARENT
 
     private val settleFrameCallback = object : Choreographer.FrameCallback {
         override fun doFrame(frameTimeNanos: Long) {
@@ -214,7 +219,7 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
             if (!value) {
                 if (isDragging) {
                     settleToOpen(
-                        progress() >= activeInteraction.releaseOpenThreshold,
+                        revealProgress() >= activeInteraction.releaseOpenThreshold,
                         SettlingSource.Release,
                         true,
                         0.0,
@@ -342,7 +347,7 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
                 activeInteraction.overdragPx,
             )
         }
-        applyProgress()
+        applyPresentation()
 
         if (resumeSettling) {
             if (resumePaused) {
@@ -374,20 +379,20 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
                 if (pointerIndex < 0) return false
                 val deltaX = event.getX(pointerIndex) - downX
                 val deltaY = event.getY(pointerIndex) - downY
-                val revealDelta = deltaX * revealDirection()
-                val canMove = canMove(revealDelta)
+                val revealDelta = deltaX * openingDirection()
+                val drawerCanMove = canMoveInDirection(revealDelta)
                 val horizontalIntent = abs(deltaX) > touchSlop && abs(deltaX) > abs(deltaY)
                 if (horizontalIntent && touchedDescendantCanScrollHorizontally(deltaX)) {
                     yieldGestureToDescendant()
                     return false
                 }
-                if (canMove && horizontalIntent) {
+                if (drawerCanMove && horizontalIntent) {
                     beginDragging(event.getX(pointerIndex))
                     hasDragged = true
                     parent?.requestDisallowInterceptTouchEvent(true)
                     return true
                 }
-                if (max(abs(deltaX), abs(deltaY)) > touchSlop && (!canMove || abs(deltaY) >= abs(deltaX))) {
+                if (max(abs(deltaX), abs(deltaY)) > touchSlop && (!drawerCanMove || abs(deltaY) >= abs(deltaX))) {
                     yieldGestureToDescendant()
                 }
             }
@@ -414,7 +419,7 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
                     val deltaX = x - downX
                     val deltaY = event.getY(pointerIndex) - downY
                     val horizontalIntent = abs(deltaX) > touchSlop && abs(deltaX) > abs(deltaY)
-                    if (canMove(deltaX * revealDirection()) && horizontalIntent) {
+                    if (canMoveInDirection(deltaX * openingDirection()) && horizontalIntent) {
                         beginDragging(x)
                         hasDragged = true
                         parent?.requestDisallowInterceptTouchEvent(true)
@@ -424,7 +429,7 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
                     val deltaX = x - dragStartX
                     val deltaY = event.getY(pointerIndex) - downY
                     if (abs(deltaX) > touchSlop && abs(deltaX) > abs(deltaY)) hasDragged = true
-                    updateDragReveal(x)
+                    updateDragPosition(x)
                     publishProgress()
                 }
                 return true
@@ -433,12 +438,12 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
                 if (isDragging) {
                     val pointerIndex = event.findPointerIndex(activePointerId)
                     if (pointerIndex >= 0) {
-                        updateDragReveal(event.getX(pointerIndex))
+                        updateDragPosition(event.getX(pointerIndex))
                         publishProgress()
                     }
                     val tracker = ensureVelocityTracker()
                     tracker.computeCurrentVelocity(1000, maximumFlingVelocity.toFloat())
-                    val revealVelocity = tracker.getXVelocity(activePointerId) * revealDirection()
+                    val revealVelocity = tracker.getXVelocity(activePointerId) * openingDirection()
                     settleFromRelease(revealVelocity, hasDragged)
                 } else {
                     resumePausedSettle()
@@ -449,7 +454,7 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
             MotionEvent.ACTION_CANCEL -> {
                 if (isDragging) {
                     settleToOpen(
-                        progress() >= activeInteraction.releaseOpenThreshold,
+                        revealProgress() >= activeInteraction.releaseOpenThreshold,
                         SettlingSource.Release,
                         true,
                         0.0,
@@ -469,7 +474,7 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
         if (phase == Phase.Settling) synchronizeSettleFrame()
         stopSettleFrames()
         when (phase) {
-            Phase.Dragging -> finishAtOpen(progress() >= 0.5f)
+            Phase.Dragging -> finishAtOpen(revealProgress() >= 0.5f)
             Phase.Settling -> finishAtOpen(targetOpen)
             Phase.Closed, Phase.Open -> Unit
         }
@@ -522,7 +527,7 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
 
     fun setMotionConfig(config: ReadableArray?) {
         motion = SideDrawerMotion.compile(config, resources.displayMetrics.density)
-        if (hasLaidOut) applyProgress()
+        if (hasLaidOut) applyPresentation()
     }
 
     fun setOverlayColor(color: Int?) {
@@ -541,7 +546,7 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
     }
 
     fun toggle(animated: Boolean) {
-        val nextOpen = if (phase == Phase.Settling) !targetOpen else progress() < 0.5f
+        val nextOpen = if (phase == Phase.Settling) !targetOpen else revealProgress() < 0.5f
         setOpen(nextOpen, animated)
     }
 
@@ -567,7 +572,7 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
         contentShadowElevationPx = 0f
         progressEventsEnabled = false
         progressSnapshotPending = false
-        applyProgress()
+        applyPresentation()
     }
 
     private fun setOpen(nextOpen: Boolean, animated: Boolean) {
@@ -592,14 +597,14 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
 
     private fun settleFromRelease(velocityPxPerSecond: Float, performHaptic: Boolean) {
         val interaction = activeInteraction
-        val presentedVelocity = releaseRevealVelocity(velocityPxPerSecond)
-        val naturalReveal = naturalTargetReveal(
+        val presentedVelocity = releaseVelocityForCurrentDrag(velocityPxPerSecond)
+        val projectedPosition = projectedReleasePosition(
             revealPx,
             presentedVelocity * interaction.releaseVelocitySensitivity,
         )
-        val nextOpen = naturalReveal >= laidOutDrawerWidthPx * interaction.releaseOpenThreshold
+        val nextOpen = projectedPosition >= laidOutDrawerWidthPx * interaction.releaseOpenThreshold
         if (performHaptic && nextOpen != gestureOriginOpen) gestureReleaseHaptic?.perform(this)
-        val target = targetReveal(nextOpen)
+        val target = targetPosition(nextOpen)
         val transferredVelocity = presentedVelocity * interaction.releaseVelocityTransfer
         val boundedVelocity = limitSideDrawerReleaseVelocity(
             revealPx,
@@ -626,7 +631,7 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
         publishProgress()
         stopSettleFrames()
         settlePausedForTouch = false
-        val target = targetReveal(nextOpen)
+        val target = targetPosition(nextOpen)
         val atRest = abs(revealPx - target) <= SETTLE_POSITION_EPSILON_PX
         if (!animated || atRest) {
             finishAtOpen(nextOpen)
@@ -637,7 +642,7 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
 
     private fun startSettle(velocityPxPerSecond: Double) {
         choreographer.removeFrameCallback(settleFrameCallback)
-        settleStartRevealPx = revealPx
+        settleStartPositionPx = revealPx
         settleInitialVelocityPxPerSecond = velocityPxPerSecond
         settleVelocityPxPerSecond = velocityPxPerSecond
         settleStartTimeNanos = System.nanoTime()
@@ -648,9 +653,9 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
 
     private fun updateSettleFrame(frameTimeNanos: Long): Boolean {
         if (!settleRunning) return false
-        val target = targetReveal(targetOpen)
+        val target = targetPosition(targetOpen)
         val elapsed = (frameTimeNanos - settleStartTimeNanos).coerceAtLeast(0L) / NANOS_PER_SECOND
-        val initialDisplacement = (settleStartRevealPx - target).toDouble()
+        val initialDisplacement = (settleStartPositionPx - target).toDouble()
         val initialVelocity = settleInitialVelocityPxPerSecond
         evaluateSideDrawerSpring(activeInteraction.spring, initialDisplacement, initialVelocity, elapsed, settleState)
         val displacement = settleState.displacement
@@ -658,7 +663,7 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
 
         revealPx = target + displacement.toFloat()
         settleVelocityPxPerSecond = velocity
-        applyProgress()
+        applyPresentation()
         publishProgress()
         if (abs(displacement) <= SETTLE_POSITION_EPSILON_PX && abs(velocity) <= SETTLE_VELOCITY_EPSILON_PX_PER_SECOND) {
             finishAtOpen(targetOpen)
@@ -667,15 +672,15 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
         return true
     }
 
-    private fun naturalTargetReveal(currentReveal: Float, velocityPxPerSecond: Double): Float {
+    private fun projectedReleasePosition(currentPosition: Float, velocityPxPerSecond: Double): Float {
         val maximum = laidOutDrawerWidthPx.roundToInt()
-        val boundedReveal = currentReveal.coerceIn(0f, laidOutDrawerWidthPx)
-        if (velocityPxPerSecond.isNaN()) return boundedReveal
+        val boundedPosition = currentPosition.coerceIn(0f, laidOutDrawerWidthPx)
+        if (velocityPxPerSecond.isNaN()) return boundedPosition
         if (velocityPxPerSecond >= Int.MAX_VALUE) return laidOutDrawerWidthPx
         if (velocityPxPerSecond <= Int.MIN_VALUE) return 0f
         targetResolverScroller.forceFinished(true)
         targetResolverScroller.fling(
-            boundedReveal.roundToInt(),
+            boundedPosition.roundToInt(),
             0,
             velocityPxPerSecond.roundToInt(),
             0,
@@ -691,12 +696,12 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
         stopSettleFrames()
         settlePausedForTouch = false
         settleVelocityPxPerSecond = 0.0
-        revealPx = targetReveal(nextOpen)
+        revealPx = targetPosition(nextOpen)
         open = nextOpen
         targetOpen = nextOpen
         phase = if (nextOpen) Phase.Open else Phase.Closed
         settlingSource = SettlingSource.None
-        applyProgress()
+        applyPresentation()
         publishProgress()
         emitOpenChangeIfNeeded()
         setHighFrameRateRequested(false)
@@ -723,7 +728,7 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
         settlePausedForTouch = false
         isDragging = true
         activeInteraction = configuredInteraction
-        startDragMapping(if (wasSettling) currentX else downX)
+        beginDragPositionTracking(if (wasSettling) currentX else downX)
         gestureOriginOpen = interruptedTarget
         targetOpen = interruptedTarget
         settlingSource = SettlingSource.None
@@ -779,7 +784,7 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
         choreographer.removeFrameCallback(settleFrameCallback)
     }
 
-    private fun startDragMapping(currentX: Float) {
+    private fun beginDragPositionTracking(currentX: Float) {
         dragLowerBoundPx = min(0f, revealPx)
         dragUpperBoundPx = max(laidOutDrawerWidthPx, revealPx)
         reanchorDrag(currentX, revealPx)
@@ -809,13 +814,13 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
         return false
     }
 
-    private fun revealDirection(): Int {
+    private fun openingDirection(): Int {
         val isRtl = layoutDirection == LAYOUT_DIRECTION_RTL
         val revealsLeft = (side == Side.Start) != isRtl
         return if (revealsLeft) 1 else -1
     }
 
-    private fun canMove(revealDelta: Float): Boolean =
+    private fun canMoveInDirection(revealDelta: Float): Boolean =
         (revealPx > 0f || revealDelta > 0f) && (revealPx < laidOutDrawerWidthPx || revealDelta < 0f)
 
     private fun setUnconstrainedDragPosition(value: Float) {
@@ -826,12 +831,12 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
             dragUpperBoundPx,
             activeInteraction.overdragPx,
         )
-        applyProgress()
+        applyPresentation()
     }
 
-    private fun updateDragReveal(currentX: Float) {
+    private fun updateDragPosition(currentX: Float) {
         lastPointerX = currentX
-        var dragPosition = dragStartPositionPx + (currentX - dragStartX) * revealDirection()
+        var dragPosition = dragStartPositionPx + (currentX - dragStartX) * openingDirection()
         if (activeInteraction.overdragPx <= 0f) {
             val boundedPosition = dragPosition.coerceIn(dragLowerBoundPx, dragUpperBoundPx)
             if (boundedPosition != dragPosition) {
@@ -843,7 +848,7 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
         setUnconstrainedDragPosition(dragPosition)
     }
 
-    private fun releaseRevealVelocity(velocityPxPerSecond: Float): Float {
+    private fun releaseVelocityForCurrentDrag(velocityPxPerSecond: Float): Float {
         return resistedSideDrawerVelocity(
             unconstrainedDragPositionPx,
             dragLowerBoundPx,
@@ -875,7 +880,7 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
         view.setRequestedFrameRate(frameRate)
     }
 
-    private fun applyProgress() {
+    private fun applyPresentation() {
         val currentProgress = if (laidOutDrawerWidthPx > 0f) {
             (revealPx / laidOutDrawerWidthPx).coerceIn(0f, 1f)
         } else {
@@ -899,7 +904,7 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
             motion.evaluate(SideDrawerMotionChannel.ContentOpacity, currentProgress, 1f).coerceIn(0f, 1f)
         val contentScale = motion.evaluate(SideDrawerMotionChannel.ContentScale, currentProgress, 1f)
         val contentTranslationX =
-            revealDirection() * revealPx +
+            openingDirection() * revealPx +
                 motion.evaluate(SideDrawerMotionChannel.ContentTranslationX, currentProgress, 0f)
         val contentTranslationY =
             motion.evaluate(SideDrawerMotionChannel.ContentTranslationY, currentProgress, 0f)
@@ -941,10 +946,12 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
 
     private fun setAccessibilityState(panelState: Int, contentState: Int) {
         if (panelView?.importantForAccessibility != panelState) panelView?.importantForAccessibility = panelState
-        if (contentView?.importantForAccessibility != contentState) contentView?.importantForAccessibility = contentState
+        if (contentView?.importantForAccessibility != contentState) {
+            contentView?.importantForAccessibility = contentState
+        }
     }
 
-    private fun progress(): Float {
+    private fun revealProgress(): Float {
         return if (laidOutDrawerWidthPx > 0f) {
             (revealPx / laidOutDrawerWidthPx).coerceIn(0f, 1f)
         } else {
@@ -952,7 +959,7 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
         }
     }
 
-    private fun targetReveal(nextOpen: Boolean): Float = if (nextOpen) laidOutDrawerWidthPx else 0f
+    private fun targetPosition(nextOpen: Boolean): Float = if (nextOpen) laidOutDrawerWidthPx else 0f
 
     private fun phaseName(): String = when (phase) {
         Phase.Closed -> "closed"
@@ -973,7 +980,7 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
     private fun progressPayload(): WritableMap {
         return Arguments.createMap().apply {
             putString("phase", phaseName())
-            putDouble("progress", progress().toDouble())
+            putDouble("progress", revealProgress().toDouble())
             putString("settlingSource", settlingSourceName())
             putBoolean("targetOpen", targetOpen)
         }

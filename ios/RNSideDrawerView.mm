@@ -1,14 +1,13 @@
 #import "RNSideDrawerView.h"
 
 #import "RNSideDrawerContentView.h"
+#import "RNSideDrawerGestureScrollView.h"
 #import "RNSideDrawerInteraction.h"
 #import "RNSideDrawerMotion.h"
 #import "RNSideDrawerPanelView.h"
 #import "RNSideDrawerSlots.h"
 #import "RNPagerDrawerHapticFeedback.h"
 
-#import <React/RCTTouchHandler.h>
-#import <React/RCTSurfaceTouchHandler.h>
 #import <React/UIView+React.h>
 #import <QuartzCore/QuartzCore.h>
 #include <float.h>
@@ -26,95 +25,6 @@ typedef NS_ENUM(NSInteger, RNSideDrawerSettlingSource) {
   RNSideDrawerSettlingSourceProgrammatic,
   RNSideDrawerSettlingSourceRelease,
 };
-
-static UIGestureRecognizer *RNSideDrawerFindReactTouchHandler(UIView *view)
-{
-  for (UIView *ancestor = view; ancestor != nil; ancestor = ancestor.superview) {
-    for (UIGestureRecognizer *gestureRecognizer in ancestor.gestureRecognizers) {
-      if ([gestureRecognizer isKindOfClass:RCTTouchHandler.class] ||
-          [gestureRecognizer isKindOfClass:RCTSurfaceTouchHandler.class]) {
-        return gestureRecognizer;
-      }
-    }
-  }
-  return nil;
-}
-
-static BOOL RNSideDrawerHorizontalScrollRange(UIScrollView *scrollView, CGFloat *minimumOffset, CGFloat *maximumOffset)
-{
-  if (!scrollView.scrollEnabled || !scrollView.panGestureRecognizer.enabled) return NO;
-
-  UIEdgeInsets inset = scrollView.adjustedContentInset;
-  *minimumOffset = -inset.left;
-  *maximumOffset = MAX(*minimumOffset, scrollView.contentSize.width - scrollView.bounds.size.width + inset.right);
-  return *maximumOffset > *minimumOffset;
-}
-
-static BOOL RNSideDrawerTouchedDescendantCanScrollHorizontally(
-    UIView *view,
-    UIScrollView *drawerScrollView,
-    UIPanGestureRecognizer *drawerPanGestureRecognizer)
-{
-  for (UIView *candidate = view; candidate != nil && candidate != drawerScrollView; candidate = candidate.superview) {
-    if (![candidate isKindOfClass:UIScrollView.class]) continue;
-    UIScrollView *scrollView = (UIScrollView *)candidate;
-    CGFloat minimumOffset;
-    CGFloat maximumOffset;
-    if (!RNSideDrawerHorizontalScrollRange(scrollView, &minimumOffset, &maximumOffset)) continue;
-
-    CGFloat velocity = [drawerPanGestureRecognizer velocityInView:scrollView].x;
-    if ((velocity > 0 && scrollView.contentOffset.x > minimumOffset) ||
-        (velocity < 0 && scrollView.contentOffset.x < maximumOffset)) {
-      return YES;
-    }
-  }
-  return NO;
-}
-
-static void RNSideDrawerCancelTouchedHorizontalScrollPans(
-    UIView *view,
-    UIScrollView *drawerScrollView)
-{
-  for (UIView *candidate = view; candidate != nil && candidate != drawerScrollView; candidate = candidate.superview) {
-    if (![candidate isKindOfClass:UIScrollView.class]) continue;
-    UIScrollView *scrollView = (UIScrollView *)candidate;
-    CGFloat minimumOffset;
-    CGFloat maximumOffset;
-    if (!RNSideDrawerHorizontalScrollRange(scrollView, &minimumOffset, &maximumOffset)) continue;
-
-    scrollView.panGestureRecognizer.enabled = NO;
-    scrollView.panGestureRecognizer.enabled = YES;
-  }
-}
-
-@interface RNSideDrawerScrollView : UIScrollView
-@property (nonatomic, copy, nullable) void (^didBeginContact)(UIView *view);
-@property (nonatomic, copy, nullable) BOOL (^shouldBeginPan)(CGPoint velocity);
-@end
-
-@implementation RNSideDrawerScrollView
-
-- (BOOL)touchesShouldBegin:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event inContentView:(UIView *)view
-{
-  if (self.didBeginContact != nil) self.didBeginContact(view);
-  return [super touchesShouldBegin:touches withEvent:event inContentView:view];
-}
-
-- (BOOL)touchesShouldCancelInContentView:(UIView *)view
-{
-  (void)view;
-  return YES;
-}
-
-- (BOOL)gestureRecognizerShouldBegin:(UIGestureRecognizer *)gestureRecognizer
-{
-  if (gestureRecognizer == self.panGestureRecognizer && self.shouldBeginPan != nil) {
-    return self.shouldBeginPan([self.panGestureRecognizer velocityInView:self]);
-  }
-  return [super gestureRecognizerShouldBegin:gestureRecognizer];
-}
-
-@end
 
 @interface RNSideDrawerContentPresentationView : UIView
 @end
@@ -143,80 +53,85 @@ static void RNSideDrawerCancelTouchedHorizontalScrollPans(
 @end
 
 @interface RNSideDrawerView () <UIScrollViewDelegate>
-- (void)applyContentReveal:(CGFloat)reveal;
-- (void)applyMotionProgress:(CGFloat)progress;
-- (void)applyProgress:(CGFloat)progress;
-- (void)applyContentCorners;
-- (void)applySettlingInteractionState;
-- (void)advanceSettleToTime:(CFTimeInterval)time;
-- (void)cancelActiveDragAtOffset:(CGFloat)offset;
-- (void)commitReleaseWithRevealVelocity:(CGFloat)revealVelocity targetOpen:(BOOL)targetOpen;
-- (void)finishAtOpen:(BOOL)open;
-- (void)handlePanGesture:(UIPanGestureRecognizer *)panGestureRecognizer;
-- (void)handleContactBeginInView:(UIView *)view;
-- (void)pauseActiveSettle;
-- (BOOL)prepareSettleToOpen:(BOOL)open
-                    reveal:(CGFloat)reveal
-                  velocity:(CGFloat)velocity;
-- (CGFloat)presentationReveal;
-- (CGFloat)progress;
-- (void)publishProgressForReveal:(CGFloat)reveal;
-- (CGFloat)releaseRevealVelocity;
-- (CGFloat)revealFromContentCenter;
 - (void)setOpen:(BOOL)open animated:(BOOL)animated source:(RNSideDrawerSettlingSource)source;
-- (BOOL)shouldBeginPanWithVelocity:(CGPoint)velocity;
 - (void)startSettleToOpen:(BOOL)open
            revealVelocity:(CGFloat)revealVelocity
               interaction:(rnsidedrawer::Interaction)interaction;
+- (BOOL)prepareSettleToOpen:(BOOL)open
+                    reveal:(CGFloat)reveal
+                  velocity:(CGFloat)velocity;
 - (void)startPreparedSettleAnimatorToOpen:(BOOL)open;
-- (void)startSettleDisplayLink;
-- (void)stopScrollMotionAtOffset:(CGFloat)offset;
 - (CGFloat)stopSettleAtCurrentPosition;
-- (void)stopSettleDisplayLink;
-- (void)updateSettleDisplayLink;
+- (void)pauseActiveSettle;
+- (void)finishAtOpen:(BOOL)open;
+- (void)advanceSettleToTime:(CFTimeInterval)time;
+
+- (BOOL)canBeginPanWithVelocity:(CGPoint)velocity;
+- (void)handleContactBegin;
+- (void)handlePanGesture:(UIPanGestureRecognizer *)panGestureRecognizer;
+- (void)updateDragFromPanGesture;
+- (CGFloat)releaseRevealVelocity;
+- (void)commitReleaseWithRevealVelocity:(CGFloat)revealVelocity targetOpen:(BOOL)targetOpen;
+- (void)cancelActiveDragAtScrollOffset:(CGFloat)offset;
+- (void)stopScrollMotionAtOffset:(CGFloat)offset;
+
+- (CGFloat)revealProgress;
+- (CGFloat)presentedReveal;
+- (CGFloat)revealFromContentPosition;
+- (void)alignFixedViewsToScrollOffset:(CGFloat)offset;
+- (void)positionContentForReveal:(CGFloat)reveal;
+- (void)applyPresentationAtProgress:(CGFloat)progress;
+- (void)applyMotionAtProgress:(CGFloat)progress;
+- (void)applySettlingInteractionState;
+- (void)applyContentCorners;
 - (void)updateContentBorderColor;
 - (void)updateContentShadowColor;
-- (void)updateCountertrackedFramesForOffset:(CGFloat)offset;
-- (void)updateRevealFromPanGesture;
+
+- (void)startSettleDisplayLink;
+- (void)stopSettleDisplayLink;
+- (void)updateSettleDisplayLink;
+- (void)publishProgressForReveal:(CGFloat)reveal;
 @end
 
 @implementation RNSideDrawerView {
-  RNSideDrawerScrollView *_scrollView;
-  __weak UIView *_contactView;
-  __weak UIGestureRecognizer *_reactTouchHandler;
+  RNSideDrawerGestureScrollView *_scrollView;
   UIView *_contactBackingView;
   RNSideDrawerContentPresentationView *_contentPresentationView;
   UIView *_contentHostView;
   RNSideDrawerBorderLayer *_contentBorderLayer;
-  NSMutableArray<UIView *> *_slots;
   UIView<RNSideDrawerPanelSlot> *_panelView;
   UIView<RNSideDrawerContentSlot> *_contentView;
+  NSMutableArray<UIView *> *_slots;
+
   RNSideDrawerPhase _phase;
   RNSideDrawerSettlingSource _settlingSource;
-  UIViewPropertyAnimator *_settleAnimator;
-  CADisplayLink *_settleDisplayLink;
-  RNPagerDrawerHapticFeedback *_hapticFeedback;
-  BOOL _settleActive;
-  BOOL _settlePausedForTracking;
-  BOOL _hasLaidOut;
-  BOOL _gestureHapticTriggered;
-  BOOL _gestureOriginOpen;
-  BOOL _progressSnapshotPending;
-  BOOL _suppressCurrentDragRelease;
   BOOL _open;
   BOOL _targetOpen;
   BOOL _lastEmittedOpen;
-  NSInteger _revealDirection;
+  BOOL _hasLaidOut;
+  BOOL _progressSnapshotPending;
+  NSInteger _openingDirection;
   CGFloat _laidOutDrawerWidth;
   CGFloat _reveal;
+
+  RNPagerDrawerHapticFeedback *_hapticFeedback;
+  BOOL _gestureOriginOpen;
+  BOOL _gestureHapticTriggered;
+  BOOL _suppressCurrentDragRelease;
   CGFloat _releaseRevealVelocity;
   CGFloat _unconstrainedDragPosition;
   CGFloat _dragStartPosition;
   CGFloat _dragStartTranslation;
   CGFloat _dragLowerBound;
   CGFloat _dragUpperBound;
+
+  UIViewPropertyAnimator *_settleAnimator;
+  CADisplayLink *_settleDisplayLink;
+  BOOL _settleActive;
+  BOOL _settlePausedForTracking;
   CGFloat _settleVelocity;
   CFTimeInterval _lastSettleTime;
+
   rnsidedrawer::InteractionConfiguration _configuredInteraction;
   rnsidedrawer::Interaction _activeInteraction;
   rnsidedrawer::Motion _motion;
@@ -267,10 +182,10 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
     _side = RNSideDrawerSideStart;
     _phase = RNSideDrawerPhaseClosed;
     _settlingSource = RNSideDrawerSettlingSourceNone;
-    _revealDirection = 1;
+    _openingDirection = 1;
     _slots = [NSMutableArray arrayWithCapacity:2];
 
-    _scrollView = [[RNSideDrawerScrollView alloc] initWithFrame:self.bounds];
+    _scrollView = [[RNSideDrawerGestureScrollView alloc] initWithFrame:self.bounds];
     _scrollView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     _scrollView.backgroundColor = UIColor.clearColor;
     _scrollView.alwaysBounceHorizontal = NO;
@@ -286,12 +201,12 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
     [_scrollView.panGestureRecognizer addTarget:self action:@selector(handlePanGesture:)];
 
     __weak RNSideDrawerView *weakSelf = self;
-    _scrollView.didBeginContact = ^(UIView *view) {
-      [weakSelf handleContactBeginInView:view];
+    _scrollView.didBeginContact = ^{
+      [weakSelf handleContactBegin];
     };
-    _scrollView.shouldBeginPan = ^BOOL(CGPoint velocity) {
+    _scrollView.canBeginDrawerPan = ^BOOL(CGPoint velocity) {
       RNSideDrawerView *strongSelf = weakSelf;
-      return strongSelf != nil && [strongSelf shouldBeginPanWithVelocity:velocity];
+      return strongSelf != nil && [strongSelf canBeginPanWithVelocity:velocity];
     };
     [super addSubview:_scrollView];
 
@@ -345,7 +260,7 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
   CGFloat previousDragLowerBound = _dragLowerBound;
   CGFloat previousDragUpperBound = _dragUpperBound;
 
-  _revealDirection = [self resolvedRevealDirection];
+  _openingDirection = [self resolvedOpeningDirection];
   _laidOutDrawerWidth = MAX(0, _drawerWidth);
   _scrollView.frame = self.bounds;
 
@@ -380,10 +295,10 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
     _reveal = rnsidedrawer::resistedPosition(
         _unconstrainedDragPosition, _dragLowerBound, _dragUpperBound, _activeInteraction.overdrag);
     _dragStartPosition = _unconstrainedDragPosition;
-    _dragStartTranslation = [_scrollView.panGestureRecognizer translationInView:self].x * _revealDirection;
+    _dragStartTranslation = [_scrollView.panGestureRecognizer translationInView:self].x * _openingDirection;
   }
-  [self setPhysicalOffset:[self physicalOffsetForProgress:[self progress]]];
-  [self applyProgress:[self progress]];
+  [self setScrollOffset:[self scrollOffsetForProgress:[self revealProgress]]];
+  [self applyPresentationAtProgress:[self revealProgress]];
   [self applyContentCorners];
 
   if (resumeSettling) {
@@ -500,7 +415,7 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
   _configuredInteraction.releaseOpenThreshold =
       isfinite(releaseOpenThreshold) && releaseOpenThreshold >= 0 && releaseOpenThreshold <= 1
       ? releaseOpenThreshold
-      : 0.5;
+      : kDefaultInteractionConfiguration.releaseOpenThreshold;
 }
 
 - (CGFloat)releaseOpenThreshold
@@ -510,9 +425,10 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
 
 - (void)setReleaseVelocitySensitivity:(CGFloat)releaseVelocitySensitivity
 {
-  _configuredInteraction.releaseVelocitySensitivity = isfinite(releaseVelocitySensitivity) && releaseVelocitySensitivity >= 0
+  _configuredInteraction.releaseVelocitySensitivity =
+      isfinite(releaseVelocitySensitivity) && releaseVelocitySensitivity >= 0
       ? releaseVelocitySensitivity
-      : 1;
+      : kDefaultInteractionConfiguration.releaseVelocitySensitivity;
 }
 
 - (CGFloat)releaseVelocitySensitivity
@@ -522,9 +438,10 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
 
 - (void)setReleaseVelocityTransfer:(CGFloat)releaseVelocityTransfer
 {
-  _configuredInteraction.releaseVelocityTransfer = isfinite(releaseVelocityTransfer) && releaseVelocityTransfer >= 0
+  _configuredInteraction.releaseVelocityTransfer =
+      isfinite(releaseVelocityTransfer) && releaseVelocityTransfer >= 0
       ? releaseVelocityTransfer
-      : 1;
+      : kDefaultInteractionConfiguration.releaseVelocityTransfer;
 }
 
 - (CGFloat)releaseVelocityTransfer
@@ -573,7 +490,7 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
   if (_gestureEnabled == gestureEnabled) return;
   _gestureEnabled = gestureEnabled;
   if (!gestureEnabled && _phase == RNSideDrawerPhaseDragging) {
-    [self setOpen:[self progress] >= _activeInteraction.releaseOpenThreshold
+    [self setOpen:[self revealProgress] >= _activeInteraction.releaseOpenThreshold
          animated:YES
            source:RNSideDrawerSettlingSourceRelease];
   } else {
@@ -612,13 +529,13 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
   _motion = rnsidedrawer::compileMotion(_motionConfig);
   if (!_hasLaidOut) return;
   if (_phase == RNSideDrawerPhaseSettling) {
-    CGFloat reveal = [self presentationReveal];
+    CGFloat reveal = [self presentedReveal];
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
-    [self applyMotionProgress:RNSideDrawerClamp(reveal / MAX(_laidOutDrawerWidth, 1), 0, 1)];
+    [self applyMotionAtProgress:RNSideDrawerClamp(reveal / MAX(_laidOutDrawerWidth, 1), 0, 1)];
     [CATransaction commit];
   } else {
-    [self applyProgress:[self progress]];
+    [self applyPresentationAtProgress:[self revealProgress]];
   }
   [self updateSettleDisplayLink];
 }
@@ -717,7 +634,7 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
 
 - (void)toggleAnimated:(BOOL)animated
 {
-  BOOL open = _phase == RNSideDrawerPhaseSettling ? !_targetOpen : [self progress] < 0.5;
+  BOOL open = _phase == RNSideDrawerPhaseSettling ? !_targetOpen : [self revealProgress] < 0.5;
   [self setOpen:open animated:animated source:RNSideDrawerSettlingSourceProgrammatic];
 }
 
@@ -737,16 +654,16 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
   CGFloat revealVelocity = _phase == RNSideDrawerPhaseSettling ? [self stopSettleAtCurrentPosition] : 0;
   BOOL cancelActiveDrag = _phase == RNSideDrawerPhaseDragging;
   if (cancelActiveDrag) {
-    [self updateRevealFromPanGesture];
-    [self applyProgress:[self progress]];
+    [self updateDragFromPanGesture];
+    [self applyPresentationAtProgress:[self revealProgress]];
     _suppressCurrentDragRelease = YES;
   }
   _targetOpen = open;
   _settlingSource = source;
   _phase = RNSideDrawerPhaseSettling;
   if (cancelActiveDrag) {
-    [self cancelActiveDragAtOffset:[self physicalOffsetForProgress:[self progress]]];
-    [self applyProgress:[self progress]];
+    [self cancelActiveDragAtScrollOffset:[self scrollOffsetForProgress:[self revealProgress]]];
+    [self applyPresentationAtProgress:[self revealProgress]];
   }
   [self publishProgress];
   if (!animated) {
@@ -775,8 +692,8 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
 - (void)startPreparedSettleAnimatorToOpen:(BOOL)open
 {
   [self applySettlingInteractionState];
-  CGFloat targetReveal = open ? _laidOutDrawerWidth : 0;
-  CGFloat distance = targetReveal - _reveal;
+  CGFloat targetPosition = open ? _laidOutDrawerWidth : 0;
+  CGFloat distance = targetPosition - _reveal;
   CGFloat normalizedVelocity = fabs(distance) > DBL_EPSILON ? _settleVelocity / distance : 0;
   const rnsidedrawer::Spring &spring = _activeInteraction.spring;
   UISpringTimingParameters *timing = [[UISpringTimingParameters alloc]
@@ -795,7 +712,7 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
   [animator addAnimations:^{
     RNSideDrawerView *strongSelf = weakSelf;
     if (strongSelf == nil) return;
-    [strongSelf applyContentReveal:targetReveal];
+    [strongSelf positionContentForReveal:targetPosition];
   }];
   [animator addCompletion:^(__unused UIViewAnimatingPosition finalPosition) {
     RNSideDrawerView *strongSelf = weakSelf;
@@ -814,12 +731,12 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
                     reveal:(CGFloat)reveal
                   velocity:(CGFloat)velocity
 {
-  CGFloat targetReveal = open ? _laidOutDrawerWidth : 0;
+  CGFloat targetPosition = open ? _laidOutDrawerWidth : 0;
   UIScreen *screen = self.window.screen ?: UIScreen.mainScreen;
   CGFloat pixelTolerance = 1.0 / MAX(screen.scale, 1.0);
   CGFloat resolvedVelocity = isfinite(velocity) ? velocity : 0;
   _reveal = reveal;
-  if (fabs(reveal - targetReveal) <= pixelTolerance) {
+  if (fabs(reveal - targetPosition) <= pixelTolerance) {
     _settleVelocity = 0;
     _settlePausedForTracking = NO;
     _settleActive = NO;
@@ -839,11 +756,11 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
   CGFloat velocity = _settleVelocity;
   [_settleAnimator stopAnimation:YES];
   _settleAnimator = nil;
-  _reveal = [self revealFromContentCenter];
+  _reveal = [self revealFromContentPosition];
   _settleActive = NO;
   _settlePausedForTracking = NO;
   [self stopSettleDisplayLink];
-  [self applyProgress:[self progress]];
+  [self applyPresentationAtProgress:[self revealProgress]];
   return velocity;
 }
 
@@ -858,10 +775,8 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
   [self startSettleDisplayLink];
 }
 
-- (void)handleContactBeginInView:(UIView *)view
+- (void)handleContactBegin
 {
-  _contactView = view;
-  _reactTouchHandler = RNSideDrawerFindReactTouchHandler(view);
   [_hapticFeedback prepare];
   [self pauseActiveSettle];
 }
@@ -878,7 +793,7 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
   _targetOpen = open;
   _settlingSource = RNSideDrawerSettlingSourceNone;
   _phase = open ? RNSideDrawerPhaseOpen : RNSideDrawerPhaseClosed;
-  [self setProgress:(open ? 1 : 0)];
+  [self setRevealProgress:(open ? 1 : 0)];
   [self publishProgress];
   [self emitOpenChangeIfNeeded];
 }
@@ -902,42 +817,20 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
   _suppressCurrentDragRelease = NO;
 }
 
-- (BOOL)shouldBeginPanWithVelocity:(CGPoint)velocity
+- (BOOL)canBeginPanWithVelocity:(CGPoint)velocity
 {
-  if (!_gestureEnabled || _laidOutDrawerWidth <= 0 || fabs(velocity.x) <= fabs(velocity.y)) {
-    _contactView = nil;
-    return NO;
-  }
-  CGFloat revealVelocity = velocity.x * _revealDirection;
-  BOOL drawerCanMove = YES;
-  if (_reveal <= 0) {
-    drawerCanMove = revealVelocity > 0;
-  } else if (_reveal >= _laidOutDrawerWidth) {
-    drawerCanMove = revealVelocity < 0;
-  }
-  BOOL descendantCanScroll = drawerCanMove && RNSideDrawerTouchedDescendantCanScrollHorizontally(
-      _contactView, _scrollView, _scrollView.panGestureRecognizer);
-  if (drawerCanMove && !descendantCanScroll) {
-    RNSideDrawerCancelTouchedHorizontalScrollPans(_contactView, _scrollView);
-  }
-  _contactView = nil;
-  return drawerCanMove && !descendantCanScroll;
+  if (!_gestureEnabled || _laidOutDrawerWidth <= 0 || fabs(velocity.x) <= fabs(velocity.y)) return NO;
+
+  CGFloat revealVelocity = velocity.x * _openingDirection;
+  if (_reveal <= 0) return revealVelocity > 0;
+  if (_reveal >= _laidOutDrawerWidth) return revealVelocity < 0;
+  return YES;
 }
 
 - (void)scrollViewWillBeginDragging:(UIScrollView *)scrollView
 {
   (void)scrollView;
-  UIGestureRecognizer *reactTouchHandler = _reactTouchHandler;
-  _contactView = nil;
-  _reactTouchHandler = nil;
-  if (reactTouchHandler.enabled) {
-    if ([reactTouchHandler isKindOfClass:RCTTouchHandler.class]) {
-      [(RCTTouchHandler *)reactTouchHandler cancel];
-    } else {
-      reactTouchHandler.enabled = NO;
-      reactTouchHandler.enabled = YES;
-    }
-  }
+  [_scrollView cancelReactTouchesForActivePan];
   _suppressCurrentDragRelease = NO;
   BOOL interruptedTargetOpen = _phase == RNSideDrawerPhaseSettling ? _targetOpen : _open;
   _gestureOriginOpen = interruptedTargetOpen;
@@ -948,7 +841,7 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
   _unconstrainedDragPosition = _dragStartPosition;
   _dragLowerBound = MIN(0, _reveal);
   _dragUpperBound = MAX(_laidOutDrawerWidth, _reveal);
-  _dragStartTranslation = [_scrollView.panGestureRecognizer translationInView:self].x * _revealDirection;
+  _dragStartTranslation = [_scrollView.panGestureRecognizer translationInView:self].x * _openingDirection;
   _targetOpen = interruptedTargetOpen;
   _releaseRevealVelocity = 0;
   _settlingSource = RNSideDrawerSettlingSourceNone;
@@ -960,23 +853,23 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
 - (void)scrollViewDidScroll:(UIScrollView *)scrollView
 {
   (void)scrollView;
-  CGFloat offset = [self currentPhysicalOffset];
+  CGFloat offset = [self currentScrollOffset];
   if (_phase != RNSideDrawerPhaseDragging) {
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
-    [self updateCountertrackedFramesForOffset:offset];
+    [self alignFixedViewsToScrollOffset:offset];
     [CATransaction commit];
     return;
   }
   CGFloat previousReveal = _reveal;
-  [self updateRevealFromPanGesture];
+  [self updateDragFromPanGesture];
   if (_reveal != previousReveal) {
-    [self applyProgress:[self progress]];
+    [self applyPresentationAtProgress:[self revealProgress]];
     [self publishProgress];
   } else {
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
-    [self applyContentReveal:_reveal];
+    [self positionContentForReveal:_reveal];
     [CATransaction commit];
   }
 }
@@ -988,12 +881,12 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
   (void)scrollView;
   (void)velocity;
   if (_suppressCurrentDragRelease) {
-    targetContentOffset->x = [self currentPhysicalOffset];
+    targetContentOffset->x = [self currentScrollOffset];
     targetContentOffset->y = 0;
     return;
   }
-  [self updateRevealFromPanGesture];
-  [self applyProgress:[self progress]];
+  [self updateDragFromPanGesture];
+  [self applyPresentationAtProgress:[self revealProgress]];
   CGFloat revealVelocity = [self releaseRevealVelocity];
   BOOL targetOpen = rnsidedrawer::releaseShouldOpen(
       _reveal,
@@ -1002,7 +895,7 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
       _scrollView.decelerationRate,
       _activeInteraction.releaseVelocitySensitivity,
       _activeInteraction.releaseOpenThreshold);
-  CGFloat currentOffset = [self currentPhysicalOffset];
+  CGFloat currentOffset = [self currentScrollOffset];
   [self commitReleaseWithRevealVelocity:revealVelocity targetOpen:targetOpen];
   targetContentOffset->x = currentOffset;
   targetContentOffset->y = 0;
@@ -1015,8 +908,8 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
   (void)decelerate;
   if (_suppressCurrentDragRelease) return;
   if (_phase == RNSideDrawerPhaseDragging) {
-    [self updateRevealFromPanGesture];
-    [self applyProgress:[self progress]];
+    [self updateDragFromPanGesture];
+    [self applyPresentationAtProgress:[self revealProgress]];
     if (_scrollView.panGestureRecognizer.state == UIGestureRecognizerStateEnded) {
       CGFloat revealVelocity = [self releaseRevealVelocity];
       BOOL targetOpen = rnsidedrawer::releaseShouldOpen(
@@ -1028,7 +921,7 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
           _activeInteraction.releaseOpenThreshold);
       [self commitReleaseWithRevealVelocity:revealVelocity targetOpen:targetOpen];
     } else {
-      _targetOpen = [self progress] >= _activeInteraction.releaseOpenThreshold;
+      _targetOpen = [self revealProgress] >= _activeInteraction.releaseOpenThreshold;
       _releaseRevealVelocity = 0;
       _settlingSource = RNSideDrawerSettlingSourceRelease;
       _phase = RNSideDrawerPhaseSettling;
@@ -1036,7 +929,7 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
     [self publishProgress];
   }
   if (_phase != RNSideDrawerPhaseSettling) return;
-  CGFloat offset = [self currentPhysicalOffset];
+  CGFloat offset = [self currentScrollOffset];
   BOOL shouldAnimate = [self prepareSettleToOpen:_targetOpen
                                          reveal:_reveal
                                        velocity:_releaseRevealVelocity];
@@ -1052,16 +945,11 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
 {
   (void)scrollView;
   if (_suppressCurrentDragRelease) {
-    [self stopScrollMotionAtOffset:[self currentPhysicalOffset]];
+    [self stopScrollMotionAtOffset:[self currentScrollOffset]];
     return;
   }
   if (!_settleActive) return;
-  [self stopScrollMotionAtOffset:[self currentPhysicalOffset]];
-}
-
-- (void)scrollViewDidEndDecelerating:(UIScrollView *)scrollView
-{
-  (void)scrollView;
+  [self stopScrollMotionAtOffset:[self currentScrollOffset]];
 }
 
 - (void)commitReleaseWithRevealVelocity:(CGFloat)revealVelocity targetOpen:(BOOL)targetOpen
@@ -1070,10 +958,10 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
     _gestureHapticTriggered = YES;
     [_hapticFeedback trigger];
   }
-  CGFloat targetReveal = targetOpen ? _laidOutDrawerWidth : 0;
+  CGFloat targetPosition = targetOpen ? _laidOutDrawerWidth : 0;
   CGFloat transferredVelocity = revealVelocity * _activeInteraction.releaseVelocityTransfer;
   _releaseRevealVelocity = rnsidedrawer::limitReleaseVelocity(
-      _reveal, transferredVelocity, targetReveal, _activeInteraction.spring, _activeInteraction.overdrag);
+      _reveal, transferredVelocity, targetPosition, _activeInteraction.spring, _activeInteraction.overdrag);
   _targetOpen = targetOpen;
   _settlingSource = RNSideDrawerSettlingSourceRelease;
   _phase = RNSideDrawerPhaseSettling;
@@ -1083,48 +971,48 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
 {
   if (_phase != RNSideDrawerPhaseDragging || panGestureRecognizer.state != UIGestureRecognizerStateChanged) return;
   CGFloat previousReveal = _reveal;
-  [self updateRevealFromPanGesture];
+  [self updateDragFromPanGesture];
   if (_reveal == previousReveal) return;
-  [self applyProgress:[self progress]];
+  [self applyPresentationAtProgress:[self revealProgress]];
   [self publishProgress];
 }
 
-- (NSInteger)resolvedRevealDirection
+- (NSInteger)resolvedOpeningDirection
 {
   BOOL isRTL = self.effectiveUserInterfaceLayoutDirection == UIUserInterfaceLayoutDirectionRightToLeft;
   BOOL revealsLeft = (_side == RNSideDrawerSideStart) != isRTL;
   return revealsLeft ? 1 : -1;
 }
 
-- (CGFloat)progress
+- (CGFloat)revealProgress
 {
   return RNSideDrawerClamp(_reveal / MAX(_laidOutDrawerWidth, 1), 0, 1);
 }
 
-- (CGFloat)presentationReveal
+- (CGFloat)presentedReveal
 {
   CALayer *layer = _contentPresentationView.layer.presentationLayer ?: _contentPresentationView.layer;
-  CGFloat viewportCenter = [self currentPhysicalOffset] + self.bounds.size.width * 0.5;
-  return (layer.position.x - viewportCenter) * _revealDirection;
+  CGFloat viewportCenter = [self currentScrollOffset] + self.bounds.size.width * 0.5;
+  return (layer.position.x - viewportCenter) * _openingDirection;
 }
 
-- (CGFloat)physicalOffsetForProgress:(CGFloat)progress
+- (CGFloat)scrollOffsetForProgress:(CGFloat)progress
 {
   CGFloat boundedProgress = RNSideDrawerClamp(progress, 0, 1);
   CGFloat reveal = boundedProgress * _laidOutDrawerWidth;
-  return _revealDirection > 0 ? _laidOutDrawerWidth - reveal : reveal;
+  return _openingDirection > 0 ? _laidOutDrawerWidth - reveal : reveal;
 }
 
 - (CGFloat)releaseRevealVelocity
 {
-  CGFloat velocity = [_scrollView.panGestureRecognizer velocityInView:self].x * _revealDirection;
+  CGFloat velocity = [_scrollView.panGestureRecognizer velocityInView:self].x * _openingDirection;
   return rnsidedrawer::resistedVelocity(
       _unconstrainedDragPosition, _dragLowerBound, _dragUpperBound, _activeInteraction.overdrag, velocity);
 }
 
-- (void)updateRevealFromPanGesture
+- (void)updateDragFromPanGesture
 {
-  CGFloat translation = [_scrollView.panGestureRecognizer translationInView:self].x * _revealDirection;
+  CGFloat translation = [_scrollView.panGestureRecognizer translationInView:self].x * _openingDirection;
   CGFloat dragPosition = _dragStartPosition + translation - _dragStartTranslation;
   if (_activeInteraction.overdrag <= 0) {
     CGFloat boundedPosition = RNSideDrawerClamp(dragPosition, _dragLowerBound, _dragUpperBound);
@@ -1139,16 +1027,16 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
       dragPosition, _dragLowerBound, _dragUpperBound, _activeInteraction.overdrag);
 }
 
-- (CGFloat)currentPhysicalOffset
+- (CGFloat)currentScrollOffset
 {
   return _scrollView.contentOffset.x;
 }
 
-- (void)setPhysicalOffset:(CGFloat)offset
+- (void)setScrollOffset:(CGFloat)offset
 {
   CGFloat resolvedOffset = RNSideDrawerClamp(offset, 0, _laidOutDrawerWidth);
   _scrollView.contentOffset = CGPointMake(resolvedOffset, 0);
-  [self updateCountertrackedFramesForOffset:resolvedOffset];
+  [self alignFixedViewsToScrollOffset:resolvedOffset];
 }
 
 - (void)stopScrollMotionAtOffset:(CGFloat)offset
@@ -1161,47 +1049,47 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
     _scrollView.scrollEnabled = NO;
     _scrollView.scrollEnabled = _gestureEnabled;
   }
-  [self setPhysicalOffset:offset];
+  [self setScrollOffset:offset];
   [CATransaction commit];
 }
 
-- (void)cancelActiveDragAtOffset:(CGFloat)offset
+- (void)cancelActiveDragAtScrollOffset:(CGFloat)offset
 {
   [CATransaction begin];
   [CATransaction setDisableActions:YES];
   _scrollView.scrollEnabled = NO;
   _scrollView.scrollEnabled = _gestureEnabled;
-  [self setPhysicalOffset:offset];
+  [self setScrollOffset:offset];
   [CATransaction commit];
 }
 
-- (void)updateCountertrackedFramesForOffset:(CGFloat)offset
+- (void)alignFixedViewsToScrollOffset:(CGFloat)offset
 {
   CGPoint center = CGPointMake(offset + self.bounds.size.width * 0.5, self.bounds.size.height * 0.5);
   _contactBackingView.center = center;
   if (_panelView != nil) _panelView.center = center;
 }
 
-- (CGFloat)revealFromContentCenter
+- (CGFloat)revealFromContentPosition
 {
-  CGFloat viewportCenter = [self currentPhysicalOffset] + self.bounds.size.width * 0.5;
-  return (_contentPresentationView.center.x - viewportCenter) * _revealDirection;
+  CGFloat viewportCenter = [self currentScrollOffset] + self.bounds.size.width * 0.5;
+  return (_contentPresentationView.center.x - viewportCenter) * _openingDirection;
 }
 
-- (void)setProgress:(CGFloat)progress
+- (void)setRevealProgress:(CGFloat)progress
 {
   CGFloat boundedProgress = RNSideDrawerClamp(progress, 0, 1);
   _reveal = boundedProgress * _laidOutDrawerWidth;
-  [self setPhysicalOffset:[self physicalOffsetForProgress:boundedProgress]];
-  [self applyProgress:boundedProgress];
+  [self setScrollOffset:[self scrollOffsetForProgress:boundedProgress]];
+  [self applyPresentationAtProgress:boundedProgress];
 }
 
-- (void)applyProgress:(CGFloat)progress
+- (void)applyPresentationAtProgress:(CGFloat)progress
 {
   [CATransaction begin];
   [CATransaction setDisableActions:YES];
-  [self applyContentReveal:_reveal];
-  [self applyMotionProgress:progress];
+  [self positionContentForReveal:_reveal];
+  [self applyMotionAtProgress:progress];
   [CATransaction commit];
   [_contentView setDrawerProgress:progress];
   BOOL panelEnabled = _phase != RNSideDrawerPhaseClosed;
@@ -1218,17 +1106,17 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
   }
 }
 
-- (void)applyContentReveal:(CGFloat)reveal
+- (void)positionContentForReveal:(CGFloat)reveal
 {
-  CGFloat offset = [self currentPhysicalOffset];
-  [self updateCountertrackedFramesForOffset:offset];
+  CGFloat offset = [self currentScrollOffset];
+  [self alignFixedViewsToScrollOffset:offset];
   CGPoint center = CGPointMake(
       offset + self.bounds.size.width * 0.5,
       self.bounds.size.height * 0.5);
-  _contentPresentationView.center = CGPointMake(center.x + _revealDirection * reveal, center.y);
+  _contentPresentationView.center = CGPointMake(center.x + _openingDirection * reveal, center.y);
 }
 
-- (void)applyMotionProgress:(CGFloat)progress
+- (void)applyMotionAtProgress:(CGFloat)progress
 {
   CGFloat drawerOpacity = _motion.evaluate(rnsidedrawer::MotionChannel::DrawerOpacity, progress, 1);
   CGFloat drawerScale = _motion.evaluate(rnsidedrawer::MotionChannel::DrawerScale, progress, 1);
@@ -1265,7 +1153,7 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
 - (void)applySettlingInteractionState
 {
   _panelView.userInteractionEnabled = YES;
-  [_contentView setDrawerProgress:MAX([self progress], 0.0011)];
+  [_contentView setDrawerProgress:MAX([self revealProgress], 0.0011)];
   _panelView.accessibilityElementsHidden = NO;
   _contentView.accessibilityElementsHidden = NO;
 }
@@ -1362,11 +1250,11 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
     [self stopSettleDisplayLink];
     return;
   }
-  CGFloat reveal = [self presentationReveal];
+  CGFloat reveal = [self presentedReveal];
   if (_motion.hasInterpolations()) {
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
-    [self applyMotionProgress:RNSideDrawerClamp(reveal / MAX(_laidOutDrawerWidth, 1), 0, 1)];
+    [self applyMotionAtProgress:RNSideDrawerClamp(reveal / MAX(_laidOutDrawerWidth, 1), 0, 1)];
     [CATransaction commit];
   }
   [self publishProgressForReveal:reveal];
@@ -1409,7 +1297,7 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
   if (!_progressSnapshotPending || !_progressEventsEnabled || !_hasLaidOut) return;
   _progressSnapshotPending = NO;
   CGFloat reveal = _phase == RNSideDrawerPhaseSettling && _settleAnimator != nil
-      ? [self presentationReveal]
+      ? [self presentedReveal]
       : _reveal;
   [self publishProgressForReveal:reveal];
 }
