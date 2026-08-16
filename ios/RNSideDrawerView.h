@@ -31,6 +31,7 @@ typedef NS_ENUM(NSInteger, RNSideDrawerSide) {
 @property (nonatomic, copy, nullable) RCTDirectEventBlock onProgress;
 
 - (void)closeAnimated:(BOOL)animated;
+- (void)flushPendingProgressSnapshot;
 - (void)insertReactSubview:(UIView *)subview atIndex:(NSInteger)atIndex;
 - (void)mountSlot:(UIView *)slot atIndex:(NSInteger)index;
 - (void)openAnimated:(BOOL)animated;

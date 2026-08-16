@@ -143,7 +143,7 @@ The ref exposes `open`, `close`, and `toggle`; each accepts `{ animated?: boolea
 
 The default iOS screen radius reads the private `UIScreen` display-corner property and falls back to `0` if it is unavailable. Pass an explicit `contentCornerRadius` to avoid that private lookup when App Store policy is a concern. A component-owned native content host owns the mask, so React lifecycle updates cannot replace it. Android uses `WindowInsets.getRoundedCorner` on Android 12 and later and otherwise falls back to `0` unless an override is supplied.
 
-`onProgress` reports `progress` in `[0, 1]`, `phase`, `targetOpen`, and the `release`, `programmatic`, or `none` settling source. It is observational; writing the event back into layout is not part of the component contract.
+`onProgress` reports `progress` in `[0, 1]`, `phase`, `targetOpen`, and the `release`, `programmatic`, or `none` settling source. Attaching an observer publishes the current native snapshot, including an `initialOpen` state that has not moved. It is observational; writing the event back into layout is not part of the component contract.
 
 Each motion channel has matching `inputRange` and `outputRange` arrays with at least two points. Inputs must be finite, strictly increasing, and within `[0, 1]`; outputs must be finite. Native evaluation clamps before the first input and after the last. Translation outputs use React Native layout units: points on iOS and density-independent pixels on Android.
 

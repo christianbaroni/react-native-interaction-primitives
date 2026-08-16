@@ -129,6 +129,7 @@ using RNSideDrawerMotion = std::array<RNSideDrawerInterpolation, RNSideDrawerMot
 - (void)applyContentCorners;
 - (void)applySettlingInteractionState;
 - (void)advanceSettleToTime:(CFTimeInterval)time;
+- (void)cancelActiveDragAtOffset:(CGFloat)offset;
 - (void)commitReleaseWithRevealVelocity:(CGFloat)revealVelocity targetOpen:(BOOL)targetOpen;
 - (CGFloat)directRawRevealForPresentation:(CGFloat)reveal;
 - (CGFloat)directRevealForRawReveal:(CGFloat)reveal;
@@ -179,6 +180,8 @@ using RNSideDrawerMotion = std::array<RNSideDrawerInterpolation, RNSideDrawerMot
   BOOL _hasLaidOut;
   BOOL _gestureHapticTriggered;
   BOOL _gestureOriginOpen;
+  BOOL _progressSnapshotPending;
+  BOOL _suppressCurrentDragRelease;
   BOOL _open;
   BOOL _targetOpen;
   BOOL _lastEmittedOpen;
@@ -494,6 +497,7 @@ static RNSideDrawerMotion RNSideDrawerCompileMotion(NSArray<NSNumber *> *config)
     _phase = _open ? RNSideDrawerPhaseOpen : RNSideDrawerPhaseClosed;
     _lastEmittedOpen = _open;
   }
+  [self flushPendingProgressSnapshot];
 }
 
 - (void)didMoveToWindow
@@ -576,9 +580,10 @@ static RNSideDrawerMotion RNSideDrawerCompileMotion(NSArray<NSNumber *> *config)
 {
   if (_gestureEnabled == gestureEnabled) return;
   _gestureEnabled = gestureEnabled;
-  _scrollView.scrollEnabled = gestureEnabled;
   if (!gestureEnabled && _phase == RNSideDrawerPhaseDragging) {
     [self setOpen:[self progress] >= 0.5 animated:YES source:RNSideDrawerSettlingSourceRelease];
+  } else {
+    _scrollView.scrollEnabled = gestureEnabled;
   }
 }
 
@@ -628,7 +633,14 @@ static RNSideDrawerMotion RNSideDrawerCompileMotion(NSArray<NSNumber *> *config)
 {
   if (_progressEventsEnabled == progressEventsEnabled) return;
   _progressEventsEnabled = progressEventsEnabled;
+  _progressSnapshotPending = progressEventsEnabled;
   [self updateSettleDisplayLink];
+}
+
+- (void)didSetProps:(NSArray<NSString *> *)changedProps
+{
+  (void)changedProps;
+  [self flushPendingProgressSnapshot];
 }
 
 - (void)setOverlayColor:(UIColor *)overlayColor
@@ -729,9 +741,19 @@ static RNSideDrawerMotion RNSideDrawerCompileMotion(NSArray<NSNumber *> *config)
   if ((_phase == RNSideDrawerPhaseOpen && open) || (_phase == RNSideDrawerPhaseClosed && !open)) return;
   if (animated && _phase == RNSideDrawerPhaseSettling && _targetOpen == open) return;
   CGFloat revealVelocity = _phase == RNSideDrawerPhaseSettling ? [self stopSettleAtCurrentPosition] : 0;
+  BOOL cancelActiveDrag = _phase == RNSideDrawerPhaseDragging;
+  if (cancelActiveDrag) {
+    [self updateRevealFromPanGesture];
+    [self applyProgress:[self progress]];
+    _suppressCurrentDragRelease = YES;
+  }
   _targetOpen = open;
   _settlingSource = source;
   _phase = RNSideDrawerPhaseSettling;
+  if (cancelActiveDrag) {
+    [self cancelActiveDragAtOffset:[self physicalOffsetForProgress:[self progress]]];
+    [self applyProgress:[self progress]];
+  }
   [self publishProgress];
   if (!animated) {
     [self finishAtOpen:open];
@@ -874,6 +896,8 @@ static RNSideDrawerMotion RNSideDrawerCompileMotion(NSArray<NSNumber *> *config)
   _targetOpen = NO;
   _phase = RNSideDrawerPhaseClosed;
   _settlingSource = RNSideDrawerSettlingSourceNone;
+  _progressSnapshotPending = NO;
+  _suppressCurrentDragRelease = NO;
 }
 
 - (BOOL)shouldBeginPanWithVelocity:(CGPoint)velocity
@@ -889,6 +913,7 @@ static RNSideDrawerMotion RNSideDrawerCompileMotion(NSArray<NSNumber *> *config)
 - (void)scrollViewWillBeginDragging:(UIScrollView *)scrollView
 {
   (void)scrollView;
+  _suppressCurrentDragRelease = NO;
   BOOL interruptedTargetOpen = _phase == RNSideDrawerPhaseSettling ? _targetOpen : _open;
   _gestureOriginOpen = interruptedTargetOpen;
   _gestureHapticTriggered = NO;
@@ -934,6 +959,11 @@ static RNSideDrawerMotion RNSideDrawerCompileMotion(NSArray<NSNumber *> *config)
 {
   (void)scrollView;
   (void)velocity;
+  if (_suppressCurrentDragRelease) {
+    targetContentOffset->x = [self currentPhysicalOffset];
+    targetContentOffset->y = 0;
+    return;
+  }
   [self updateRevealFromPanGesture];
   [self applyProgress:[self progress]];
   CGFloat revealVelocity = [self releaseRevealVelocity];
@@ -950,6 +980,7 @@ static RNSideDrawerMotion RNSideDrawerCompileMotion(NSArray<NSNumber *> *config)
 {
   (void)scrollView;
   (void)decelerate;
+  if (_suppressCurrentDragRelease) return;
   if (_phase == RNSideDrawerPhaseDragging) {
     [self updateRevealFromPanGesture];
     [self applyProgress:[self progress]];
@@ -982,6 +1013,10 @@ static RNSideDrawerMotion RNSideDrawerCompileMotion(NSArray<NSNumber *> *config)
 - (void)scrollViewWillBeginDecelerating:(UIScrollView *)scrollView
 {
   (void)scrollView;
+  if (_suppressCurrentDragRelease) {
+    [self stopScrollMotionAtOffset:[self currentPhysicalOffset]];
+    return;
+  }
   if (!_settleActive) return;
   [self stopScrollMotionAtOffset:[self currentPhysicalOffset]];
 }
@@ -1095,6 +1130,16 @@ static RNSideDrawerMotion RNSideDrawerCompileMotion(NSArray<NSNumber *> *config)
     _scrollView.scrollEnabled = NO;
     _scrollView.scrollEnabled = _gestureEnabled;
   }
+  [self setPhysicalOffset:offset];
+  [CATransaction commit];
+}
+
+- (void)cancelActiveDragAtOffset:(CGFloat)offset
+{
+  [CATransaction begin];
+  [CATransaction setDisableActions:YES];
+  _scrollView.scrollEnabled = NO;
+  _scrollView.scrollEnabled = _gestureEnabled;
   [self setPhysicalOffset:offset];
   [CATransaction commit];
 }
@@ -1323,6 +1368,16 @@ static RNSideDrawerMotion RNSideDrawerCompileMotion(NSArray<NSNumber *> *config)
 - (void)publishProgress
 {
   [self publishProgressForReveal:_reveal];
+}
+
+- (void)flushPendingProgressSnapshot
+{
+  if (!_progressSnapshotPending || !_progressEventsEnabled || !_hasLaidOut) return;
+  _progressSnapshotPending = NO;
+  CGFloat reveal = _phase == RNSideDrawerPhaseSettling && _settleAnimator != nil
+      ? [self presentationReveal]
+      : _reveal;
+  [self publishProgressForReveal:reveal];
 }
 
 - (void)publishProgressForReveal:(CGFloat)reveal

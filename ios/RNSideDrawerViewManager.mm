@@ -240,6 +240,12 @@ static NSString *RNSideDrawerHapticValue(RNSideDrawerViewGestureReleaseHaptic va
   _drawerView.frame = self.bounds;
 }
 
+- (void)finalizeUpdates:(RNComponentViewUpdateMask)updateMask
+{
+  [super finalizeUpdates:updateMask];
+  [_drawerView flushPendingProgressSnapshot];
+}
+
 - (void)updateProps:(const Props::Shared &)props oldProps:(const Props::Shared &)oldProps
 {
   const auto &oldViewProps = static_cast<const RNSideDrawerViewProps &>(*_props);

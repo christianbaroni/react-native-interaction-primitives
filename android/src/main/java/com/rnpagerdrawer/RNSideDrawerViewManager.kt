@@ -26,6 +26,11 @@ internal class RNSideDrawerViewManager :
 
     override fun needsCustomLayoutForChildren(): Boolean = true
 
+    override fun onAfterUpdateTransaction(view: RNSideDrawerView) {
+        super.onAfterUpdateTransaction(view)
+        view.flushPendingProgressSnapshot()
+    }
+
     override fun addView(parent: RNSideDrawerView, child: View, index: Int) {
         parent.addDrawerSlot(child, index)
     }

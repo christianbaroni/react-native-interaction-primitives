@@ -108,6 +108,7 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
     private var settleRunning = false
     private var settlePausedForTouch = false
     private var highFrameRateRequested = false
+    private var progressSnapshotPending = false
     private var velocityTracker: VelocityTracker? = null
     private var motion = arrayOfNulls<MotionInterpolation>(MOTION_CHANNEL_COUNT)
     private var overlayColor = Color.TRANSPARENT
@@ -191,6 +192,11 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
 
     var openChangeEventsEnabled: Boolean = false
     var progressEventsEnabled: Boolean = false
+        set(value) {
+            if (field == value) return
+            field = value
+            progressSnapshotPending = value
+        }
 
     var side: Side = Side.Start
         set(value) {
@@ -297,6 +303,7 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
             lastEmittedOpen = open
             phase = if (open) Phase.Open else Phase.Closed
         }
+        flushPendingProgressSnapshot()
     }
 
     override fun onInterceptTouchEvent(event: MotionEvent): Boolean {
@@ -458,6 +465,12 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
         contentView?.setDrawerOverlayColor(overlayColor)
     }
 
+    fun flushPendingProgressSnapshot() {
+        if (!progressSnapshotPending || !progressEventsEnabled || !hasLaidOut) return
+        progressSnapshotPending = false
+        publishProgress()
+    }
+
     fun close(animated: Boolean) {
         setOpen(false, animated)
     }
@@ -487,6 +500,8 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
         contentCornerRadiusPx = -1f
         contentShadowColor = Color.TRANSPARENT
         contentShadowElevationPx = 0f
+        progressEventsEnabled = false
+        progressSnapshotPending = false
         applyProgress()
     }
 
@@ -664,6 +679,7 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
     private fun pauseSettleForTouch() {
         if (phase != Phase.Settling || settlePausedForTouch) return
         synchronizeSettleFrame()
+        if (phase != Phase.Settling) return
         stopSettleFrames()
         settleVelocityPxPerSecond = 0f
         settlePausedForTouch = true
