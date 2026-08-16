@@ -158,33 +158,6 @@ export function SideDrawerExample({ navigation }: { navigation: React.ReactNode 
             </Text>
           </View>
 
-          <View style={styles.handoffSection}>
-            <View style={styles.handoffHeader}>
-              <Text style={styles.handoffTitle}>Nested horizontal scroll</Text>
-              <Text style={styles.handoffBadge}>GESTURE PROBE</Text>
-            </View>
-            <Text style={styles.handoffDetail}>
-              The row owns a drag while it can move in that direction. At an exhausted edge, the drawer stays eligible.
-            </Text>
-            <ScrollView
-              accessibilityLabel="Nested horizontal scroll gesture probe"
-              contentContainerStyle={styles.handoffCards}
-              decelerationRate="fast"
-              directionalLockEnabled
-              horizontal
-              nestedScrollEnabled
-              showsHorizontalScrollIndicator={false}
-            >
-              {HANDOFF_CARDS.map(card => (
-                <View key={card.label} style={styles.handoffCard}>
-                  <View style={[styles.handoffAccent, { backgroundColor: card.accent }]} />
-                  <Text style={styles.handoffCardLabel}>{card.label}</Text>
-                  <Text style={styles.handoffCardDetail}>{card.detail}</Text>
-                </View>
-              ))}
-            </ScrollView>
-          </View>
-
           <View style={styles.metricsCard}>
             <View style={styles.metric}>
               <Text style={styles.metricLabel}>RESPONSE</Text>
@@ -248,6 +221,33 @@ export function SideDrawerExample({ navigation }: { navigation: React.ReactNode 
             <Text style={styles.cardBody}>
               Changes are captured by the next gesture or command; an active interaction is never retuned mid-flight.
             </Text>
+          </View>
+
+          <View style={styles.handoffSection}>
+            <View style={styles.handoffHeader}>
+              <Text style={styles.handoffTitle}>Nested horizontal scroll</Text>
+              <Text style={styles.handoffBadge}>GESTURE PROBE</Text>
+            </View>
+            <Text style={styles.handoffDetail}>
+              The row owns a drag while it can move in that direction. At an exhausted edge, the drawer stays eligible.
+            </Text>
+            <ScrollView
+              accessibilityLabel="Nested horizontal scroll gesture probe"
+              contentContainerStyle={styles.handoffCards}
+              decelerationRate="fast"
+              directionalLockEnabled
+              horizontal
+              nestedScrollEnabled
+              showsHorizontalScrollIndicator={false}
+            >
+              {HANDOFF_CARDS.map(card => (
+                <View key={card.label} style={styles.handoffCard}>
+                  <View style={[styles.handoffAccent, { backgroundColor: card.accent }]} />
+                  <Text style={styles.handoffCardLabel}>{card.label}</Text>
+                  <Text style={styles.handoffCardDetail}>{card.detail}</Text>
+                </View>
+              ))}
+            </ScrollView>
           </View>
 
           <Pressable
