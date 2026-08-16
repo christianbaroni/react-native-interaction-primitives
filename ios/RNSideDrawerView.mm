@@ -1,6 +1,7 @@
 #import "RNSideDrawerView.h"
 
 #import "RNSideDrawerContentView.h"
+#import "RNSideDrawerInteraction.h"
 #import "RNSideDrawerPanelView.h"
 #import "RNSideDrawerSlots.h"
 #import "RNPagerDrawerHapticFeedback.h"
@@ -71,45 +72,6 @@ struct RNSideDrawerInterpolation {
         });
     return segment->slope * progress + segment->intercept;
   }
-};
-
-enum class RNSideDrawerSpringRegime {
-  Underdamped,
-  Critical,
-  Overdamped,
-};
-
-struct RNSideDrawerSpring {
-  CGFloat mass;
-  CGFloat stiffness;
-  CGFloat damping;
-  CGFloat frequencySquared;
-  CGFloat decayRate;
-  CGFloat secondaryFrequency;
-  RNSideDrawerSpringRegime regime;
-};
-
-struct RNSideDrawerInteraction {
-  RNSideDrawerSpring spring;
-  CGFloat overdrag;
-  CGFloat releaseOpenThreshold;
-  CGFloat releaseVelocitySensitivity;
-  CGFloat releaseVelocityTransfer;
-};
-
-struct RNSideDrawerInteractionConfiguration {
-  CGFloat springMass;
-  CGFloat springStiffness;
-  CGFloat springDamping;
-  CGFloat overdrag;
-  CGFloat releaseOpenThreshold;
-  CGFloat releaseVelocitySensitivity;
-  CGFloat releaseVelocityTransfer;
-};
-
-struct RNSideDrawerSpringState {
-  CGFloat displacement;
-  CGFloat velocity;
 };
 
 using RNSideDrawerMotion = std::array<RNSideDrawerInterpolation, RNSideDrawerMotionChannelCount>;
@@ -238,7 +200,6 @@ static void RNSideDrawerCancelTouchedHorizontalScrollPans(
 - (void)advanceSettleToTime:(CFTimeInterval)time;
 - (void)cancelActiveDragAtOffset:(CGFloat)offset;
 - (void)commitReleaseWithRevealVelocity:(CGFloat)revealVelocity targetOpen:(BOOL)targetOpen;
-- (CGFloat)directRevealForRawReveal:(CGFloat)reveal;
 - (void)finishAtOpen:(BOOL)open;
 - (void)handlePanGesture:(UIPanGestureRecognizer *)panGestureRecognizer;
 - (void)handleContactBeginInView:(UIView *)view;
@@ -255,7 +216,7 @@ static void RNSideDrawerCancelTouchedHorizontalScrollPans(
 - (BOOL)shouldBeginPanWithVelocity:(CGPoint)velocity;
 - (void)startSettleToOpen:(BOOL)open
            revealVelocity:(CGFloat)revealVelocity
-              interaction:(RNSideDrawerInteraction)interaction;
+              interaction:(rnsidedrawer::Interaction)interaction;
 - (void)startPreparedSettleAnimatorToOpen:(BOOL)open;
 - (void)startSettleDisplayLink;
 - (void)stopScrollMotionAtOffset:(CGFloat)offset;
@@ -298,256 +259,24 @@ static void RNSideDrawerCancelTouchedHorizontalScrollPans(
   CGFloat _laidOutDrawerWidth;
   CGFloat _reveal;
   CGFloat _releaseRevealVelocity;
-  CGFloat _dragRawReveal;
-  CGFloat _dragStartRawReveal;
+  CGFloat _unconstrainedDragPosition;
+  CGFloat _dragStartPosition;
   CGFloat _dragStartTranslation;
   CGFloat _dragLowerBound;
   CGFloat _dragUpperBound;
   CGFloat _settleVelocity;
   CFTimeInterval _lastSettleTime;
-  RNSideDrawerInteractionConfiguration _configuredInteraction;
-  RNSideDrawerInteraction _activeInteraction;
+  rnsidedrawer::InteractionConfiguration _configuredInteraction;
+  rnsidedrawer::Interaction _activeInteraction;
   RNSideDrawerMotion _motion;
 }
 
-static const CGFloat RNSideDrawerDefaultSpringMass = 1;
-static const CGFloat RNSideDrawerDefaultSpringStiffness = 49 * M_PI * M_PI;
-static const CGFloat RNSideDrawerDefaultSpringDamping = 14 * M_PI;
-static const CGFloat RNSideDrawerDefaultOverdrag = 4;
-static const CGFloat RNSideDrawerMillisecondsPerSecond = 1000;
+static const rnsidedrawer::InteractionConfiguration kDefaultInteractionConfiguration =
+    rnsidedrawer::defaultInteractionConfiguration();
 
 static CGFloat RNSideDrawerClamp(CGFloat value, CGFloat minimum, CGFloat maximum)
 {
   return MIN(maximum, MAX(minimum, value));
-}
-
-static CGFloat RNSideDrawerRemapReveal(CGFloat reveal, CGFloat oldWidth, CGFloat newWidth)
-{
-  if (reveal < 0) return reveal;
-  if (reveal > oldWidth) return newWidth + reveal - oldWidth;
-  return oldWidth > 0 ? reveal / oldWidth * newWidth : reveal;
-}
-
-static CGFloat RNSideDrawerDecayRate(CGFloat mass, CGFloat damping)
-{
-  return mass > 1 ? damping / mass / 2 : damping / 2 / mass;
-}
-
-static RNSideDrawerSpring RNSideDrawerResolveSpring(CGFloat mass, CGFloat stiffness, CGFloat damping)
-{
-  CGFloat frequencySquared = stiffness / mass;
-  CGFloat decayRate = RNSideDrawerDecayRate(mass, damping);
-  if (isfinite(mass) && mass > 0 && isfinite(stiffness) && stiffness > 0 && isfinite(damping) && damping > 0 &&
-      isfinite(frequencySquared) && frequencySquared > 0 && isfinite(decayRate) && decayRate > 0) {
-    CGFloat naturalFrequency = sqrt(frequencySquared);
-    CGFloat tolerance = 32 * DBL_EPSILON * MAX(decayRate, naturalFrequency);
-    if (fabs(decayRate - naturalFrequency) <= tolerance) {
-      return {mass, stiffness, damping, frequencySquared, decayRate, 0, RNSideDrawerSpringRegime::Critical};
-    }
-    if (decayRate < naturalFrequency) {
-      CGFloat ratio = decayRate / naturalFrequency;
-      return {
-          mass,
-          stiffness,
-          damping,
-          frequencySquared,
-          decayRate,
-          naturalFrequency * sqrt(MAX(0, 1 - ratio * ratio)),
-          RNSideDrawerSpringRegime::Underdamped};
-    }
-    CGFloat ratio = naturalFrequency / decayRate;
-    return {
-        mass,
-        stiffness,
-        damping,
-        frequencySquared,
-        decayRate,
-        decayRate * sqrt(MAX(0, 1 - ratio * ratio)),
-        RNSideDrawerSpringRegime::Overdamped};
-  }
-  return RNSideDrawerResolveSpring(
-      RNSideDrawerDefaultSpringMass, RNSideDrawerDefaultSpringStiffness, RNSideDrawerDefaultSpringDamping);
-}
-
-static RNSideDrawerInteractionConfiguration RNSideDrawerDefaultInteractionConfiguration()
-{
-  return {
-      RNSideDrawerDefaultSpringMass,
-      RNSideDrawerDefaultSpringStiffness,
-      RNSideDrawerDefaultSpringDamping,
-      RNSideDrawerDefaultOverdrag,
-      0.5,
-      1,
-      1};
-}
-
-static RNSideDrawerInteraction RNSideDrawerResolveInteraction(
-    RNSideDrawerInteractionConfiguration configuration)
-{
-  return {
-      RNSideDrawerResolveSpring(
-          configuration.springMass, configuration.springStiffness, configuration.springDamping),
-      configuration.overdrag,
-      configuration.releaseOpenThreshold,
-      configuration.releaseVelocitySensitivity,
-      configuration.releaseVelocityTransfer};
-}
-
-static RNSideDrawerSpringState RNSideDrawerSpringStateAtTime(
-    RNSideDrawerSpring spring, CGFloat displacement, CGFloat velocity, CFTimeInterval elapsed)
-{
-  if (elapsed <= 0) return {displacement, velocity};
-  if (spring.regime == RNSideDrawerSpringRegime::Underdamped) {
-    CGFloat angularFrequency = spring.secondaryFrequency;
-    CGFloat sineCoefficient = (velocity + spring.decayRate * displacement) / angularFrequency;
-    CGFloat angle = angularFrequency * elapsed;
-    CGFloat decay = exp(-spring.decayRate * elapsed);
-    CGFloat oscillation = displacement * cos(angle) + sineCoefficient * sin(angle);
-    CGFloat oscillationVelocity =
-        -displacement * angularFrequency * sin(angle) + sineCoefficient * angularFrequency * cos(angle);
-    return {decay * oscillation, decay * (oscillationVelocity - spring.decayRate * oscillation)};
-  }
-
-  if (spring.regime == RNSideDrawerSpringRegime::Overdamped) {
-    CGFloat slowRate = -spring.frequencySquared / (spring.decayRate + spring.secondaryFrequency);
-    CGFloat fastRate = -(spring.decayRate + spring.secondaryFrequency);
-    CGFloat slowCoefficient = (velocity - fastRate * displacement) / (slowRate - fastRate);
-    CGFloat fastCoefficient = displacement - slowCoefficient;
-    CGFloat slowDecay = exp(slowRate * elapsed);
-    CGFloat fastDecay = exp(fastRate * elapsed);
-    return {
-        slowCoefficient * slowDecay + fastCoefficient * fastDecay,
-        slowRate * slowCoefficient * slowDecay + fastRate * fastCoefficient * fastDecay};
-  }
-
-  CGFloat coefficient = velocity + spring.decayRate * displacement;
-  CGFloat decay = exp(-spring.decayRate * elapsed);
-  return {
-      (displacement + coefficient * elapsed) * decay,
-      (velocity - spring.decayRate * coefficient * elapsed) * decay};
-}
-
-static CGFloat RNSideDrawerPresentedReleaseVelocity(
-    CGFloat rawReveal, CGFloat lowerBound, CGFloat upperBound, CGFloat overdrag, CGFloat velocity)
-{
-  if (!isfinite(velocity)) return 0;
-  if (overdrag <= 0) {
-    if ((rawReveal <= lowerBound && velocity < 0) || (rawReveal >= upperBound && velocity > 0)) return 0;
-    return velocity;
-  }
-  if (rawReveal >= lowerBound && rawReveal <= upperBound) return velocity;
-  CGFloat boundary = rawReveal < lowerBound ? lowerBound : upperBound;
-  CGFloat normalized = tanh((rawReveal - boundary) / overdrag);
-  return velocity * (1 - normalized * normalized);
-}
-
-static CGFloat RNSideDrawerProjectedReveal(
-    CGFloat reveal, CGFloat velocityPointsPerSecond, CGFloat upperBound, CGFloat decelerationRate)
-{
-  CGFloat rate = isfinite(decelerationRate)
-      ? RNSideDrawerClamp(decelerationRate, 0, 0.999999)
-      : UIScrollViewDecelerationRateNormal;
-  CGFloat boundedReveal = RNSideDrawerClamp(reveal, 0, upperBound);
-  if (isnan(velocityPointsPerSecond)) return boundedReveal;
-  if (isinf(velocityPointsPerSecond)) return velocityPointsPerSecond;
-  CGFloat velocityPointsPerMillisecond = velocityPointsPerSecond / RNSideDrawerMillisecondsPerSecond;
-  return boundedReveal + velocityPointsPerMillisecond * rate / (1 - rate);
-}
-
-static BOOL RNSideDrawerReleaseTargetsOpen(CGFloat reveal,
-                                           CGFloat velocityPointsPerSecond,
-                                           CGFloat upperBound,
-                                           CGFloat decelerationRate,
-                                           CGFloat velocitySensitivity,
-                                           CGFloat openThreshold)
-{
-  CGFloat projectedReveal = RNSideDrawerProjectedReveal(
-      reveal, velocityPointsPerSecond * velocitySensitivity, upperBound, decelerationRate);
-  return RNSideDrawerClamp(projectedReveal, 0, upperBound) >= upperBound * openThreshold;
-}
-
-static CGFloat RNSideDrawerOutwardExcursion(
-    CGFloat reveal, CGFloat velocity, CGFloat target, RNSideDrawerSpring spring)
-{
-  CGFloat outwardDirection = target > 0 ? 1 : -1;
-  CGFloat displacement = reveal - target;
-  CGFloat maximumExcursion = MAX(0, outwardDirection * displacement);
-  auto includeExtremum = [&](CFTimeInterval time) {
-    if (time <= 0 || !isfinite(time)) return;
-    RNSideDrawerSpringState state = RNSideDrawerSpringStateAtTime(spring, displacement, velocity, time);
-    if (!isfinite(state.displacement)) {
-      maximumExcursion = INFINITY;
-      return;
-    }
-    maximumExcursion = MAX(maximumExcursion, outwardDirection * state.displacement);
-  };
-
-  if (spring.regime == RNSideDrawerSpringRegime::Underdamped) {
-    CGFloat angularFrequency = spring.secondaryFrequency;
-    CGFloat sineCoefficient =
-        -(spring.decayRate * velocity + spring.frequencySquared * displacement) / angularFrequency;
-    CGFloat phase = atan2(velocity, sineCoefficient);
-    CGFloat rootIndex = floor(phase / M_PI) + 1;
-    CFTimeInterval firstExtremum = (rootIndex * M_PI - phase) / angularFrequency;
-    includeExtremum(firstExtremum);
-    includeExtremum(firstExtremum + M_PI / angularFrequency);
-    return MAX(0, maximumExcursion);
-  }
-
-  if (spring.regime == RNSideDrawerSpringRegime::Overdamped) {
-    CGFloat slowRate = -spring.frequencySquared / (spring.decayRate + spring.secondaryFrequency);
-    CGFloat fastRate = -(spring.decayRate + spring.secondaryFrequency);
-    CGFloat slowCoefficient = (velocity - fastRate * displacement) / (slowRate - fastRate);
-    CGFloat fastCoefficient = displacement - slowCoefficient;
-    CGFloat denominator = slowRate * slowCoefficient;
-    if (denominator != 0 && isfinite(denominator)) {
-      CGFloat ratio = -(fastRate * fastCoefficient) / denominator;
-      if (ratio > 0 && isfinite(ratio)) includeExtremum(log(ratio) / (slowRate - fastRate));
-    }
-    return MAX(0, maximumExcursion);
-  }
-
-  CGFloat coefficient = velocity + spring.decayRate * displacement;
-  CGFloat denominator = spring.decayRate * coefficient;
-  if (denominator != 0 && isfinite(denominator)) includeExtremum(velocity / denominator);
-  return MAX(0, maximumExcursion);
-}
-
-static CGFloat RNSideDrawerBoundedSettleVelocity(
-    CGFloat reveal, CGFloat velocity, CGFloat target, RNSideDrawerSpring spring, CGFloat allowedExcursion)
-{
-  CGFloat outwardDirection = target > 0 ? 1 : -1;
-  CGFloat currentExcursion = MAX(0, outwardDirection * (reveal - target));
-  CGFloat naturalExcursion = RNSideDrawerOutwardExcursion(reveal, 0, target, spring);
-  allowedExcursion = MAX(allowedExcursion, MAX(currentExcursion, naturalExcursion));
-  if (velocity == 0) return 0;
-  if (isfinite(velocity) &&
-      RNSideDrawerOutwardExcursion(reveal, velocity, target, spring) <= allowedExcursion) {
-    return velocity;
-  }
-
-  CGFloat direction = velocity < 0 ? -1 : 1;
-  CGFloat requestedMagnitude = fabs(velocity);
-  CGFloat estimate = spring.decayRate * MAX(allowedExcursion, 1);
-  CGFloat upperMagnitude = isfinite(estimate) ? MAX(1, MIN(requestedMagnitude, estimate)) : 1;
-  CGFloat lowerMagnitude = 0;
-  while (true) {
-    CGFloat excursion = RNSideDrawerOutwardExcursion(reveal, direction * upperMagnitude, target, spring);
-    if (!isfinite(excursion) || excursion > allowedExcursion) break;
-    if (upperMagnitude >= requestedMagnitude) return velocity;
-    lowerMagnitude = upperMagnitude;
-    upperMagnitude = MIN(requestedMagnitude, upperMagnitude * 2);
-  }
-  for (NSUInteger iteration = 0; iteration < 40; iteration += 1) {
-    CGFloat candidateMagnitude = lowerMagnitude + (upperMagnitude - lowerMagnitude) * 0.5;
-    CGFloat excursion = RNSideDrawerOutwardExcursion(reveal, direction * candidateMagnitude, target, spring);
-    if (!isfinite(excursion) || excursion > allowedExcursion) {
-      upperMagnitude = candidateMagnitude;
-    } else {
-      lowerMagnitude = candidateMagnitude;
-    }
-  }
-  return direction * lowerMagnitude;
 }
 
 static bool RNSideDrawerHasMotion(const RNSideDrawerMotion &motion)
@@ -633,8 +362,8 @@ static RNSideDrawerMotion RNSideDrawerCompileMotion(NSArray<NSNumber *> *config)
     _contentShadowRadius = 0;
     _motionConfig = @[];
     _overlayColor = UIColor.clearColor;
-    _configuredInteraction = RNSideDrawerDefaultInteractionConfiguration();
-    _activeInteraction = RNSideDrawerResolveInteraction(_configuredInteraction);
+    _configuredInteraction = kDefaultInteractionConfiguration;
+    _activeInteraction = rnsidedrawer::resolveInteraction(_configuredInteraction);
     _drawerWidth = 0;
     _gestureEnabled = YES;
     _side = RNSideDrawerSideStart;
@@ -714,7 +443,7 @@ static RNSideDrawerMotion RNSideDrawerCompileMotion(NSArray<NSNumber *> *config)
   CGFloat resumeVelocity = resumeSettling ? [self stopSettleAtCurrentPosition] : 0;
   CGFloat previousDrawerWidth = _laidOutDrawerWidth;
   CGFloat previousReveal = _reveal;
-  CGFloat previousRawReveal = _dragRawReveal;
+  CGFloat previousDragPosition = _unconstrainedDragPosition;
   CGFloat previousDragLowerBound = _dragLowerBound;
   CGFloat previousDragUpperBound = _dragUpperBound;
 
@@ -744,11 +473,15 @@ static RNSideDrawerMotion RNSideDrawerCompileMotion(NSArray<NSNumber *> *config)
   _scrollView.contentSize = CGSizeMake(width + _laidOutDrawerWidth, height);
   _hasLaidOut = YES;
   if (_phase == RNSideDrawerPhaseDragging) {
-    _dragRawReveal = RNSideDrawerRemapReveal(previousRawReveal, previousDrawerWidth, _laidOutDrawerWidth);
-    _dragLowerBound = RNSideDrawerRemapReveal(previousDragLowerBound, previousDrawerWidth, _laidOutDrawerWidth);
-    _dragUpperBound = RNSideDrawerRemapReveal(previousDragUpperBound, previousDrawerWidth, _laidOutDrawerWidth);
-    _reveal = [self directRevealForRawReveal:_dragRawReveal];
-    _dragStartRawReveal = _dragRawReveal;
+    _unconstrainedDragPosition =
+        rnsidedrawer::remapPositionForWidthChange(previousDragPosition, previousDrawerWidth, _laidOutDrawerWidth);
+    _dragLowerBound =
+        rnsidedrawer::remapPositionForWidthChange(previousDragLowerBound, previousDrawerWidth, _laidOutDrawerWidth);
+    _dragUpperBound =
+        rnsidedrawer::remapPositionForWidthChange(previousDragUpperBound, previousDrawerWidth, _laidOutDrawerWidth);
+    _reveal = rnsidedrawer::resistedPosition(
+        _unconstrainedDragPosition, _dragLowerBound, _dragUpperBound, _activeInteraction.overdrag);
+    _dragStartPosition = _unconstrainedDragPosition;
     _dragStartTranslation = [_scrollView.panGestureRecognizer translationInView:self].x * _revealDirection;
   }
   [self setPhysicalOffset:[self physicalOffsetForProgress:[self progress]]];
@@ -856,7 +589,7 @@ static RNSideDrawerMotion RNSideDrawerCompileMotion(NSArray<NSNumber *> *config)
 - (void)setOverdrag:(CGFloat)overdrag
 {
   _configuredInteraction.overdrag =
-      isfinite(overdrag) && overdrag >= 0 ? overdrag : RNSideDrawerDefaultOverdrag;
+      isfinite(overdrag) && overdrag >= 0 ? overdrag : kDefaultInteractionConfiguration.overdrag;
 }
 
 - (CGFloat)overdrag
@@ -904,7 +637,9 @@ static RNSideDrawerMotion RNSideDrawerCompileMotion(NSArray<NSNumber *> *config)
 - (void)setSpringDamping:(CGFloat)springDamping
 {
   _configuredInteraction.springDamping =
-      isfinite(springDamping) && springDamping > 0 ? springDamping : RNSideDrawerDefaultSpringDamping;
+      isfinite(springDamping) && springDamping > 0
+      ? springDamping
+      : kDefaultInteractionConfiguration.springDamping;
 }
 
 - (CGFloat)springDamping
@@ -915,7 +650,7 @@ static RNSideDrawerMotion RNSideDrawerCompileMotion(NSArray<NSNumber *> *config)
 - (void)setSpringMass:(CGFloat)springMass
 {
   _configuredInteraction.springMass =
-      isfinite(springMass) && springMass > 0 ? springMass : RNSideDrawerDefaultSpringMass;
+      isfinite(springMass) && springMass > 0 ? springMass : kDefaultInteractionConfiguration.springMass;
 }
 
 - (CGFloat)springMass
@@ -927,7 +662,7 @@ static RNSideDrawerMotion RNSideDrawerCompileMotion(NSArray<NSNumber *> *config)
 {
   _configuredInteraction.springStiffness = isfinite(springStiffness) && springStiffness > 0
       ? springStiffness
-      : RNSideDrawerDefaultSpringStiffness;
+      : kDefaultInteractionConfiguration.springStiffness;
 }
 
 - (CGFloat)springStiffness
@@ -1120,16 +855,16 @@ static RNSideDrawerMotion RNSideDrawerCompileMotion(NSArray<NSNumber *> *config)
     [self finishAtOpen:open];
     return;
   }
-  RNSideDrawerInteraction interaction =
+  rnsidedrawer::Interaction interaction =
       cancelActiveDrag && source == RNSideDrawerSettlingSourceRelease
       ? _activeInteraction
-      : RNSideDrawerResolveInteraction(_configuredInteraction);
+      : rnsidedrawer::resolveInteraction(_configuredInteraction);
   [self startSettleToOpen:open revealVelocity:revealVelocity interaction:interaction];
 }
 
 - (void)startSettleToOpen:(BOOL)open
            revealVelocity:(CGFloat)revealVelocity
-              interaction:(RNSideDrawerInteraction)interaction
+              interaction:(rnsidedrawer::Interaction)interaction
 {
   _activeInteraction = interaction;
   if (![self prepareSettleToOpen:open reveal:_reveal velocity:revealVelocity]) {
@@ -1145,7 +880,7 @@ static RNSideDrawerMotion RNSideDrawerCompileMotion(NSArray<NSNumber *> *config)
   CGFloat targetReveal = open ? _laidOutDrawerWidth : 0;
   CGFloat distance = targetReveal - _reveal;
   CGFloat normalizedVelocity = fabs(distance) > DBL_EPSILON ? _settleVelocity / distance : 0;
-  RNSideDrawerSpring spring = _activeInteraction.spring;
+  const rnsidedrawer::Spring &spring = _activeInteraction.spring;
   UISpringTimingParameters *timing = [[UISpringTimingParameters alloc]
       initWithMass:spring.mass
          stiffness:spring.stiffness
@@ -1310,9 +1045,9 @@ static RNSideDrawerMotion RNSideDrawerCompileMotion(NSArray<NSNumber *> *config)
   _gestureOriginOpen = interruptedTargetOpen;
   _gestureHapticTriggered = NO;
   if (_settleActive) [self stopSettleAtCurrentPosition];
-  _activeInteraction = RNSideDrawerResolveInteraction(_configuredInteraction);
-  _dragStartRawReveal = _reveal;
-  _dragRawReveal = _dragStartRawReveal;
+  _activeInteraction = rnsidedrawer::resolveInteraction(_configuredInteraction);
+  _dragStartPosition = _reveal;
+  _unconstrainedDragPosition = _dragStartPosition;
   _dragLowerBound = MIN(0, _reveal);
   _dragUpperBound = MAX(_laidOutDrawerWidth, _reveal);
   _dragStartTranslation = [_scrollView.panGestureRecognizer translationInView:self].x * _revealDirection;
@@ -1362,7 +1097,7 @@ static RNSideDrawerMotion RNSideDrawerCompileMotion(NSArray<NSNumber *> *config)
   [self updateRevealFromPanGesture];
   [self applyProgress:[self progress]];
   CGFloat revealVelocity = [self releaseRevealVelocity];
-  BOOL targetOpen = RNSideDrawerReleaseTargetsOpen(
+  BOOL targetOpen = rnsidedrawer::releaseShouldOpen(
       _reveal,
       revealVelocity,
       _laidOutDrawerWidth,
@@ -1386,7 +1121,7 @@ static RNSideDrawerMotion RNSideDrawerCompileMotion(NSArray<NSNumber *> *config)
     [self applyProgress:[self progress]];
     if (_scrollView.panGestureRecognizer.state == UIGestureRecognizerStateEnded) {
       CGFloat revealVelocity = [self releaseRevealVelocity];
-      BOOL targetOpen = RNSideDrawerReleaseTargetsOpen(
+      BOOL targetOpen = rnsidedrawer::releaseShouldOpen(
           _reveal,
           revealVelocity,
           _laidOutDrawerWidth,
@@ -1439,7 +1174,7 @@ static RNSideDrawerMotion RNSideDrawerCompileMotion(NSArray<NSNumber *> *config)
   }
   CGFloat targetReveal = targetOpen ? _laidOutDrawerWidth : 0;
   CGFloat transferredVelocity = revealVelocity * _activeInteraction.releaseVelocityTransfer;
-  _releaseRevealVelocity = RNSideDrawerBoundedSettleVelocity(
+  _releaseRevealVelocity = rnsidedrawer::limitReleaseVelocity(
       _reveal, transferredVelocity, targetReveal, _activeInteraction.spring, _activeInteraction.overdrag);
   _targetOpen = targetOpen;
   _settlingSource = RNSideDrawerSettlingSourceRelease;
@@ -1482,38 +1217,28 @@ static RNSideDrawerMotion RNSideDrawerCompileMotion(NSArray<NSNumber *> *config)
   return _revealDirection > 0 ? _laidOutDrawerWidth - reveal : reveal;
 }
 
-- (CGFloat)directRevealForRawReveal:(CGFloat)reveal
-{
-  CGFloat overdrag = _activeInteraction.overdrag;
-  if (overdrag <= 0) return RNSideDrawerClamp(reveal, _dragLowerBound, _dragUpperBound);
-  if (reveal < _dragLowerBound) {
-    return _dragLowerBound + overdrag * tanh((reveal - _dragLowerBound) / overdrag);
-  }
-  if (reveal <= _dragUpperBound) return reveal;
-  return _dragUpperBound + overdrag * tanh((reveal - _dragUpperBound) / overdrag);
-}
-
 - (CGFloat)releaseRevealVelocity
 {
   CGFloat velocity = [_scrollView.panGestureRecognizer velocityInView:self].x * _revealDirection;
-  return RNSideDrawerPresentedReleaseVelocity(
-      _dragRawReveal, _dragLowerBound, _dragUpperBound, _activeInteraction.overdrag, velocity);
+  return rnsidedrawer::resistedVelocity(
+      _unconstrainedDragPosition, _dragLowerBound, _dragUpperBound, _activeInteraction.overdrag, velocity);
 }
 
 - (void)updateRevealFromPanGesture
 {
   CGFloat translation = [_scrollView.panGestureRecognizer translationInView:self].x * _revealDirection;
-  CGFloat rawReveal = _dragStartRawReveal + translation - _dragStartTranslation;
+  CGFloat dragPosition = _dragStartPosition + translation - _dragStartTranslation;
   if (_activeInteraction.overdrag <= 0) {
-    CGFloat boundedReveal = RNSideDrawerClamp(rawReveal, _dragLowerBound, _dragUpperBound);
-    if (boundedReveal != rawReveal) {
-      _dragStartRawReveal = boundedReveal;
+    CGFloat boundedPosition = RNSideDrawerClamp(dragPosition, _dragLowerBound, _dragUpperBound);
+    if (boundedPosition != dragPosition) {
+      _dragStartPosition = boundedPosition;
       _dragStartTranslation = translation;
-      rawReveal = boundedReveal;
+      dragPosition = boundedPosition;
     }
   }
-  _dragRawReveal = rawReveal;
-  _reveal = [self directRevealForRawReveal:rawReveal];
+  _unconstrainedDragPosition = dragPosition;
+  _reveal = rnsidedrawer::resistedPosition(
+      dragPosition, _dragLowerBound, _dragUpperBound, _activeInteraction.overdrag);
 }
 
 - (CGFloat)currentPhysicalOffset
@@ -1678,8 +1403,8 @@ static RNSideDrawerMotion RNSideDrawerCompileMotion(NSArray<NSNumber *> *config)
   if (!_settleActive || time <= _lastSettleTime) return;
   CFTimeInterval elapsed = time - _lastSettleTime;
   CGFloat target = _targetOpen ? _laidOutDrawerWidth : 0;
-  RNSideDrawerSpringState state =
-      RNSideDrawerSpringStateAtTime(_activeInteraction.spring, _reveal - target, _settleVelocity, elapsed);
+  rnsidedrawer::SpringState state =
+      rnsidedrawer::evaluateSpring(_activeInteraction.spring, _reveal - target, _settleVelocity, elapsed);
   _reveal = target + state.displacement;
   _settleVelocity = state.velocity;
   _lastSettleTime = time;
