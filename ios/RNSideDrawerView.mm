@@ -54,17 +54,17 @@ typedef NS_ENUM(NSInteger, RNSideDrawerSettlingSource) {
 
 @interface RNSideDrawerView () <UIScrollViewDelegate>
 - (void)setOpen:(BOOL)open animated:(BOOL)animated source:(RNSideDrawerSettlingSource)source;
-- (void)startSettleToOpen:(BOOL)open
-           revealVelocity:(CGFloat)revealVelocity
-              interaction:(rnsidedrawer::Interaction)interaction;
-- (BOOL)prepareSettleToOpen:(BOOL)open
-                    reveal:(CGFloat)reveal
-                  velocity:(CGFloat)velocity;
-- (void)startPreparedSettleAnimatorToOpen:(BOOL)open;
-- (CGFloat)stopSettleAtCurrentPosition;
-- (void)pauseActiveSettle;
-- (void)finishAtOpen:(BOOL)open;
-- (void)advanceSettleToTime:(CFTimeInterval)time;
+- (void)startTransitionWithTargetOpen:(BOOL)targetOpen
+                      initialVelocity:(CGFloat)initialVelocity
+                          interaction:(rnsidedrawer::Interaction)interaction;
+- (BOOL)prepareTransitionWithTargetOpen:(BOOL)targetOpen
+                             fromReveal:(CGFloat)reveal
+                        initialVelocity:(CGFloat)initialVelocity;
+- (void)startTransitionAnimator;
+- (CGFloat)stopTransitionAtCurrentPosition;
+- (void)pauseActiveTransition;
+- (void)completeTransitionWithDrawerOpen:(BOOL)open;
+- (void)advanceTransitionToTime:(CFTimeInterval)time;
 
 - (BOOL)canBeginPanWithVelocity:(CGPoint)velocity;
 - (void)handleContactBegin;
@@ -82,15 +82,15 @@ typedef NS_ENUM(NSInteger, RNSideDrawerSettlingSource) {
 - (void)positionContentForReveal:(CGFloat)reveal;
 - (void)applyPresentationAtProgress:(CGFloat)progress;
 - (void)applyMotionAtProgress:(CGFloat)progress;
-- (void)applySettlingInteractionState;
+- (void)prepareViewsForTransition;
 - (void)applyContentCorners;
 - (void)updateContentBorderColor;
 - (void)updateContentShadowColor;
 - (UIScreen *)currentScreen;
 
-- (void)startSettleDisplayLink;
-- (void)stopSettleDisplayLink;
-- (void)updateSettleDisplayLink;
+- (void)startPresentationDisplayLink;
+- (void)stopPresentationDisplayLink;
+- (void)refreshPresentationDisplayLink;
 - (void)publishProgressForReveal:(CGFloat)reveal;
 @end
 
@@ -126,13 +126,13 @@ typedef NS_ENUM(NSInteger, RNSideDrawerSettlingSource) {
   CGFloat _dragLowerBound;
   CGFloat _dragUpperBound;
 
-  UIViewPropertyAnimator *_settleAnimator;
-  CADisplayLink *_settleDisplayLink;
-  UIScreen *_settleDisplayScreen;
-  BOOL _settleActive;
-  BOOL _settlePausedForTracking;
-  CGFloat _settleVelocity;
-  CFTimeInterval _lastSettleTime;
+  UIViewPropertyAnimator *_transitionAnimator;
+  CADisplayLink *_presentationDisplayLink;
+  UIScreen *_presentationDisplayScreen;
+  BOOL _transitionActive;
+  BOOL _transitionPausedForTracking;
+  CGFloat _transitionVelocity;
+  CFTimeInterval _lastTransitionTime;
 
   rnsidedrawer::InteractionConfiguration _configuredInteraction;
   rnsidedrawer::Interaction _activeInteraction;
@@ -246,8 +246,8 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
 
 - (void)dealloc
 {
-  [_settleAnimator stopAnimation:YES];
-  [self stopSettleDisplayLink];
+  [_transitionAnimator stopAnimation:YES];
+  [self stopPresentationDisplayLink];
 }
 
 - (void)layoutSubviews
@@ -255,9 +255,9 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
   [super layoutSubviews];
   BOOL firstLayout = !_hasLaidOut;
   BOOL resumeSettling = _phase == RNSideDrawerPhaseSettling;
-  BOOL resumePaused = _settlePausedForTracking;
+  BOOL resumePaused = _transitionPausedForTracking;
   BOOL targetOpen = _targetOpen;
-  CGFloat resumeVelocity = resumeSettling ? [self stopSettleAtCurrentPosition] : 0;
+  CGFloat resumeVelocity = resumeSettling ? [self stopTransitionAtCurrentPosition] : 0;
   CGFloat previousDrawerWidth = _laidOutDrawerWidth;
   CGFloat previousReveal = _reveal;
   CGFloat previousDragPosition = _unconstrainedDragPosition;
@@ -307,15 +307,17 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
 
   if (resumeSettling) {
     if (resumePaused) {
-      _settleActive = YES;
-      _settlePausedForTracking = YES;
-      _settleVelocity = 0;
-      [self startSettleDisplayLink];
+      _transitionActive = YES;
+      _transitionPausedForTracking = YES;
+      _transitionVelocity = 0;
+      [self startPresentationDisplayLink];
     } else {
-      if ([self prepareSettleToOpen:targetOpen reveal:_reveal velocity:resumeVelocity]) {
-        [self startPreparedSettleAnimatorToOpen:targetOpen];
+      if ([self prepareTransitionWithTargetOpen:targetOpen
+                                     fromReveal:_reveal
+                                initialVelocity:resumeVelocity]) {
+        [self startTransitionAnimator];
       } else {
-        [self finishAtOpen:targetOpen];
+        [self completeTransitionWithDrawerOpen:targetOpen];
       }
     }
   } else if (firstLayout) {
@@ -331,9 +333,9 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
 {
   [super didMoveToWindow];
   if (self.window == nil) {
-    [self stopSettleDisplayLink];
+    [self stopPresentationDisplayLink];
   } else {
-    [self updateSettleDisplayLink];
+    [self refreshPresentationDisplayLink];
   }
   [self applyContentCorners];
   [self updateContentBorderColor];
@@ -348,7 +350,7 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
     [self updateContentBorderColor];
     [self updateContentShadowColor];
   }
-  if (_settleDisplayLink != nil) [self startSettleDisplayLink];
+  if (_presentationDisplayLink != nil) [self startPresentationDisplayLink];
 }
 
 #pragma mark - Properties
@@ -552,7 +554,7 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
   } else {
     [self applyPresentationAtProgress:[self revealProgress]];
   }
-  [self updateSettleDisplayLink];
+  [self refreshPresentationDisplayLink];
 }
 
 - (void)setProgressEventsEnabled:(BOOL)progressEventsEnabled
@@ -560,7 +562,7 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
   if (_progressEventsEnabled == progressEventsEnabled) return;
   _progressEventsEnabled = progressEventsEnabled;
   _progressSnapshotPending = progressEventsEnabled;
-  [self updateSettleDisplayLink];
+  [self refreshPresentationDisplayLink];
 }
 
 - (void)didSetProps:(NSArray<NSString *> *)changedProps
@@ -670,7 +672,7 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
   }
   if ((_phase == RNSideDrawerPhaseOpen && open) || (_phase == RNSideDrawerPhaseClosed && !open)) return;
   if (animated && _phase == RNSideDrawerPhaseSettling && _targetOpen == open) return;
-  CGFloat revealVelocity = _phase == RNSideDrawerPhaseSettling ? [self stopSettleAtCurrentPosition] : 0;
+  CGFloat revealVelocity = _phase == RNSideDrawerPhaseSettling ? [self stopTransitionAtCurrentPosition] : 0;
   BOOL cancelActiveDrag = _phase == RNSideDrawerPhaseDragging;
   if (cancelActiveDrag) {
     [self updateDragFromPanGesture];
@@ -686,34 +688,35 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
   }
   [self publishProgress];
   if (!animated) {
-    [self finishAtOpen:open];
+    [self completeTransitionWithDrawerOpen:open];
     return;
   }
   rnsidedrawer::Interaction interaction =
       cancelActiveDrag && source == RNSideDrawerSettlingSourceRelease
       ? _activeInteraction
       : rnsidedrawer::resolveInteraction(_configuredInteraction);
-  [self startSettleToOpen:open revealVelocity:revealVelocity interaction:interaction];
+  [self startTransitionWithTargetOpen:open initialVelocity:revealVelocity interaction:interaction];
 }
 
-- (void)startSettleToOpen:(BOOL)open
-           revealVelocity:(CGFloat)revealVelocity
-              interaction:(rnsidedrawer::Interaction)interaction
+- (void)startTransitionWithTargetOpen:(BOOL)targetOpen
+                      initialVelocity:(CGFloat)initialVelocity
+                          interaction:(rnsidedrawer::Interaction)interaction
 {
   _activeInteraction = interaction;
-  if (![self prepareSettleToOpen:open reveal:_reveal velocity:revealVelocity]) {
-    [self finishAtOpen:open];
+  if (![self prepareTransitionWithTargetOpen:targetOpen fromReveal:_reveal initialVelocity:initialVelocity]) {
+    [self completeTransitionWithDrawerOpen:targetOpen];
     return;
   }
-  [self startPreparedSettleAnimatorToOpen:open];
+  [self startTransitionAnimator];
 }
 
-- (void)startPreparedSettleAnimatorToOpen:(BOOL)open
+- (void)startTransitionAnimator
 {
-  [self applySettlingInteractionState];
-  CGFloat targetPosition = open ? _laidOutDrawerWidth : 0;
+  BOOL targetOpen = _targetOpen;
+  [self prepareViewsForTransition];
+  CGFloat targetPosition = targetOpen ? _laidOutDrawerWidth : 0;
   CGFloat distance = targetPosition - _reveal;
-  CGFloat normalizedVelocity = fabs(distance) > DBL_EPSILON ? _settleVelocity / distance : 0;
+  CGFloat normalizedVelocity = fabs(distance) > DBL_EPSILON ? _transitionVelocity / distance : 0;
   const rnsidedrawer::Spring &spring = _activeInteraction.spring;
   UISpringTimingParameters *timing = [[UISpringTimingParameters alloc]
       initWithMass:spring.mass
@@ -736,78 +739,79 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
   [animator addCompletion:^(__unused UIViewAnimatingPosition finalPosition) {
     RNSideDrawerView *strongSelf = weakSelf;
     UIViewPropertyAnimator *strongAnimator = weakAnimator;
-    if (strongSelf == nil || strongSelf->_settleAnimator != strongAnimator) return;
-    strongSelf->_settleAnimator = nil;
-    [strongSelf finishAtOpen:open];
+    if (strongSelf == nil || strongSelf->_transitionAnimator != strongAnimator) return;
+    strongSelf->_transitionAnimator = nil;
+    [strongSelf completeTransitionWithDrawerOpen:targetOpen];
   }];
-  _settleAnimator = animator;
-  [self updateSettleDisplayLink];
+  _transitionAnimator = animator;
+  [self refreshPresentationDisplayLink];
   [animator startAnimation];
-  _lastSettleTime = CACurrentMediaTime();
+  _lastTransitionTime = CACurrentMediaTime();
 }
 
-- (BOOL)prepareSettleToOpen:(BOOL)open
-                    reveal:(CGFloat)reveal
-                  velocity:(CGFloat)velocity
+- (BOOL)prepareTransitionWithTargetOpen:(BOOL)targetOpen
+                             fromReveal:(CGFloat)reveal
+                        initialVelocity:(CGFloat)initialVelocity
 {
-  CGFloat targetPosition = open ? _laidOutDrawerWidth : 0;
+  CGFloat targetPosition = targetOpen ? _laidOutDrawerWidth : 0;
   UIScreen *screen = [self currentScreen];
   CGFloat pixelTolerance = 1.0 / MAX(screen.scale, 1.0);
-  CGFloat resolvedVelocity = isfinite(velocity) ? velocity : 0;
+  CGFloat resolvedVelocity = isfinite(initialVelocity) ? initialVelocity : 0;
+  _targetOpen = targetOpen;
   _reveal = reveal;
   if (fabs(reveal - targetPosition) <= pixelTolerance) {
-    _settleVelocity = 0;
-    _settlePausedForTracking = NO;
-    _settleActive = NO;
+    _transitionVelocity = 0;
+    _transitionPausedForTracking = NO;
+    _transitionActive = NO;
     return NO;
   }
-  _settleVelocity = resolvedVelocity;
-  _lastSettleTime = CACurrentMediaTime();
-  _settlePausedForTracking = NO;
-  _settleActive = YES;
+  _transitionVelocity = resolvedVelocity;
+  _lastTransitionTime = CACurrentMediaTime();
+  _transitionPausedForTracking = NO;
+  _transitionActive = YES;
   return YES;
 }
 
-- (CGFloat)stopSettleAtCurrentPosition
+- (CGFloat)stopTransitionAtCurrentPosition
 {
-  if (!_settleActive) return 0;
-  if (!_scrollView.tracking && !_settlePausedForTracking) [self advanceSettleToTime:CACurrentMediaTime()];
-  CGFloat velocity = _settleVelocity;
-  [_settleAnimator stopAnimation:YES];
-  _settleAnimator = nil;
+  if (!_transitionActive) return 0;
+  if (!_scrollView.tracking && !_transitionPausedForTracking) [self advanceTransitionToTime:CACurrentMediaTime()];
+  CGFloat velocity = _transitionVelocity;
+  [_transitionAnimator stopAnimation:YES];
+  _transitionAnimator = nil;
   _reveal = [self revealFromContentPosition];
-  _settleActive = NO;
-  _settlePausedForTracking = NO;
-  [self stopSettleDisplayLink];
+  _transitionActive = NO;
+  _transitionPausedForTracking = NO;
+  [self stopPresentationDisplayLink];
   [self applyPresentationAtProgress:[self revealProgress]];
   return velocity;
 }
 
-- (void)pauseActiveSettle
+- (void)pauseActiveTransition
 {
-  if (!_settleActive || _settlePausedForTracking) return;
-  (void)[self stopSettleAtCurrentPosition];
-  _settleVelocity = 0;
-  _settlePausedForTracking = YES;
-  _settleActive = YES;
-  _lastSettleTime = CACurrentMediaTime();
-  [self startSettleDisplayLink];
+  if (!_transitionActive || _transitionPausedForTracking) return;
+  (void)[self stopTransitionAtCurrentPosition];
+  _transitionVelocity = 0;
+  _transitionPausedForTracking = YES;
+  _transitionActive = YES;
+  _lastTransitionTime = CACurrentMediaTime();
+  [self startPresentationDisplayLink];
 }
 
 - (void)handleContactBegin
 {
   [_hapticFeedback prepare];
-  [self pauseActiveSettle];
+  [self pauseActiveTransition];
 }
 
-- (void)finishAtOpen:(BOOL)open
+- (void)completeTransitionWithDrawerOpen:(BOOL)open
 {
-  [_settleAnimator stopAnimation:YES];
-  _settleAnimator = nil;
-  _settleActive = NO;
-  _settlePausedForTracking = NO;
-  [self stopSettleDisplayLink];
-  _settleVelocity = 0;
+  [_transitionAnimator stopAnimation:YES];
+  _transitionAnimator = nil;
+  _transitionActive = NO;
+  _transitionPausedForTracking = NO;
+  [self stopPresentationDisplayLink];
+  _transitionVelocity = 0;
   _open = open;
   _targetOpen = open;
   _settlingSource = RNSideDrawerSettlingSourceNone;
@@ -821,7 +825,7 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
 
 - (void)prepareForRemoval
 {
-  [self stopSettleAtCurrentPosition];
+  [self stopTransitionAtCurrentPosition];
   _contentView.onScrimPress = nil;
   [_slots removeAllObjects];
   [_panelView removeFromSuperview];
@@ -859,7 +863,7 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
   BOOL interruptedTargetOpen = _phase == RNSideDrawerPhaseSettling ? _targetOpen : _open;
   _gestureOriginOpen = interruptedTargetOpen;
   _gestureHapticTriggered = NO;
-  if (_settleActive) [self stopSettleAtCurrentPosition];
+  if (_transitionActive) [self stopTransitionAtCurrentPosition];
   _activeInteraction = rnsidedrawer::resolveInteraction(_configuredInteraction);
   _dragStartPosition = _reveal;
   _unconstrainedDragPosition = _dragStartPosition;
@@ -954,14 +958,14 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
   }
   if (_phase != RNSideDrawerPhaseSettling) return;
   CGFloat offset = [self currentScrollOffset];
-  BOOL shouldAnimate = [self prepareSettleToOpen:_targetOpen
-                                         reveal:_reveal
-                                       velocity:_releaseRevealVelocity];
+  BOOL shouldAnimate = [self prepareTransitionWithTargetOpen:_targetOpen
+                                                  fromReveal:_reveal
+                                             initialVelocity:_releaseRevealVelocity];
   [self stopScrollMotionAtOffset:offset];
   if (shouldAnimate) {
-    [self startPreparedSettleAnimatorToOpen:_targetOpen];
+    [self startTransitionAnimator];
   } else {
-    [self finishAtOpen:_targetOpen];
+    [self completeTransitionWithDrawerOpen:_targetOpen];
   }
 }
 
@@ -972,7 +976,7 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
     [self stopScrollMotionAtOffset:[self currentScrollOffset]];
     return;
   }
-  if (!_settleActive) return;
+  if (!_transitionActive) return;
   [self stopScrollMotionAtOffset:[self currentScrollOffset]];
 }
 
@@ -1177,7 +1181,7 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
   }
 }
 
-- (void)applySettlingInteractionState
+- (void)prepareViewsForTransition
 {
   _panelView.userInteractionEnabled = YES;
   [_contentView setDrawerProgress:MAX([self revealProgress], 0.0011)];
@@ -1218,80 +1222,83 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
 
 #pragma mark - Settling observation
 
-- (void)advanceSettleToTime:(CFTimeInterval)time
+- (void)advanceTransitionToTime:(CFTimeInterval)time
 {
-  if (!_settleActive || time <= _lastSettleTime) return;
-  CFTimeInterval elapsed = time - _lastSettleTime;
+  if (!_transitionActive || time <= _lastTransitionTime) return;
+  CFTimeInterval elapsed = time - _lastTransitionTime;
   CGFloat target = _targetOpen ? _laidOutDrawerWidth : 0;
   rnsidedrawer::SpringState state =
-      rnsidedrawer::evaluateSpring(_activeInteraction.spring, _reveal - target, _settleVelocity, elapsed);
+      rnsidedrawer::evaluateSpring(_activeInteraction.spring, _reveal - target, _transitionVelocity, elapsed);
   _reveal = target + state.displacement;
-  _settleVelocity = state.velocity;
-  _lastSettleTime = time;
+  _transitionVelocity = state.velocity;
+  _lastTransitionTime = time;
 }
 
-- (void)startSettleDisplayLink
+- (void)startPresentationDisplayLink
 {
   UIScreen *screen = [self currentScreen];
-  if (_settleDisplayLink != nil && _settleDisplayScreen != screen) [self stopSettleDisplayLink];
-  if (_settleDisplayLink == nil) {
-    _settleDisplayLink = [screen displayLinkWithTarget:self selector:@selector(stepSettleDisplayLink:)];
-    if (_settleDisplayLink == nil) return;
-    _settleDisplayScreen = screen;
-    [_settleDisplayLink addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
+  if (_presentationDisplayLink != nil && _presentationDisplayScreen != screen) {
+    [self stopPresentationDisplayLink];
+  }
+  if (_presentationDisplayLink == nil) {
+    _presentationDisplayLink =
+        [screen displayLinkWithTarget:self selector:@selector(samplePresentedTransition:)];
+    if (_presentationDisplayLink == nil) return;
+    _presentationDisplayScreen = screen;
+    [_presentationDisplayLink addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
   }
   if (@available(iOS 15.0, *)) {
     NSInteger maximumFramesPerSecond = screen.maximumFramesPerSecond;
     Float64 preferred = MIN(120, maximumFramesPerSecond);
     Float64 minimum = MIN(80, preferred);
-    _settleDisplayLink.preferredFrameRateRange = CAFrameRateRangeMake(minimum, preferred, preferred);
+    _presentationDisplayLink.preferredFrameRateRange = CAFrameRateRangeMake(minimum, preferred, preferred);
   }
 }
 
-- (void)stopSettleDisplayLink
+- (void)stopPresentationDisplayLink
 {
-  [_settleDisplayLink invalidate];
-  _settleDisplayLink = nil;
-  _settleDisplayScreen = nil;
+  [_presentationDisplayLink invalidate];
+  _presentationDisplayLink = nil;
+  _presentationDisplayScreen = nil;
 }
 
-- (void)updateSettleDisplayLink
+- (void)refreshPresentationDisplayLink
 {
-  BOOL active = _settleActive && _phase == RNSideDrawerPhaseSettling;
-  BOOL needed = _settlePausedForTracking || _progressEventsEnabled || _motion.hasInterpolations();
+  BOOL active = _transitionActive && _phase == RNSideDrawerPhaseSettling;
+  BOOL needed = _transitionPausedForTracking || _progressEventsEnabled || _motion.hasInterpolations();
   if (active && needed) {
-    [self startSettleDisplayLink];
+    [self startPresentationDisplayLink];
   } else {
-    [self stopSettleDisplayLink];
+    [self stopPresentationDisplayLink];
   }
 }
 
-- (void)stepSettleDisplayLink:(CADisplayLink *)displayLink
+- (void)samplePresentedTransition:(CADisplayLink *)displayLink
 {
   (void)displayLink;
-  if (_settleDisplayScreen != [self currentScreen]) {
-    [self startSettleDisplayLink];
+  if (_presentationDisplayScreen != [self currentScreen]) {
+    [self startPresentationDisplayLink];
     return;
   }
-  if (!_settleActive || _phase != RNSideDrawerPhaseSettling) {
-    [self stopSettleDisplayLink];
+  if (!_transitionActive || _phase != RNSideDrawerPhaseSettling) {
+    [self stopPresentationDisplayLink];
     return;
   }
-  if (_settlePausedForTracking) {
+  if (_transitionPausedForTracking) {
     if (_scrollView.tracking) return;
     BOOL targetOpen = _targetOpen;
-    _settleActive = NO;
-    _settlePausedForTracking = NO;
-    [self stopSettleDisplayLink];
-    if ([self prepareSettleToOpen:targetOpen reveal:_reveal velocity:0]) {
-      [self startPreparedSettleAnimatorToOpen:targetOpen];
+    _transitionActive = NO;
+    _transitionPausedForTracking = NO;
+    [self stopPresentationDisplayLink];
+    if ([self prepareTransitionWithTargetOpen:targetOpen fromReveal:_reveal initialVelocity:0]) {
+      [self startTransitionAnimator];
     } else {
-      [self finishAtOpen:targetOpen];
+      [self completeTransitionWithDrawerOpen:targetOpen];
     }
     return;
   }
-  if (_settleAnimator == nil) {
-    [self stopSettleDisplayLink];
+  if (_transitionAnimator == nil) {
+    [self stopPresentationDisplayLink];
     return;
   }
   CGFloat reveal = [self presentedReveal];
@@ -1342,7 +1349,7 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
 {
   if (!_progressSnapshotPending || !_progressEventsEnabled || !_hasLaidOut) return;
   _progressSnapshotPending = NO;
-  CGFloat reveal = _phase == RNSideDrawerPhaseSettling && _settleAnimator != nil
+  CGFloat reveal = _phase == RNSideDrawerPhaseSettling && _transitionAnimator != nil
       ? [self presentedReveal]
       : _reveal;
   [self publishProgressForReveal:reveal];
