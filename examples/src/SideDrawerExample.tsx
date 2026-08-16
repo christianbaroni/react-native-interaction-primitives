@@ -9,18 +9,17 @@ const DRAWER_MOTION: SideDrawerMotion = {
   content: {
     border: {
       color: '#FFFFFF',
-      opacity: { inputRange: [0, 0.9], outputRange: [0, 0.24] },
-      width: 1,
+      opacity: { inputRange: [0, 1], outputRange: [0, 0.12] },
+      width: 4 / 3,
     },
     shadow: {
       color: '#000000B3',
-      opacity: { inputRange: [0, 0.85, 1], outputRange: [0, 0.5, 0.55] },
+      opacity: { inputRange: [0, 1], outputRange: [0, 0.6] },
     },
   },
   drawer: {
-    opacity: { inputRange: [0, 0.9], outputRange: [0.1, 1] },
-    scale: { inputRange: [0, 0.9], outputRange: [0.94, 1] },
-    translateX: { inputRange: [0, 1], outputRange: [-16, 0] },
+    opacity: { inputRange: [0, 0.6], outputRange: [0.2, 1] },
+    scale: { inputRange: [0, 1], outputRange: [0.9725, 1] },
   },
   overlay: {
     color: '#000000',
@@ -62,7 +61,7 @@ export function SideDrawerExample({ navigation }: { navigation: React.ReactNode 
         </View>
       }
       drawerWidth={drawerWidth}
-      gestureReleaseHaptic="rigid"
+      gestureReleaseHaptic="selection"
       motion={DRAWER_MOTION}
       onOpenChange={setOpen}
       ref={drawerRef}
