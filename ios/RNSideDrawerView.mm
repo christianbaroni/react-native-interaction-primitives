@@ -2,6 +2,7 @@
 
 #import "RNSideDrawerContentView.h"
 #import "RNSideDrawerInteraction.h"
+#import "RNSideDrawerMotion.h"
 #import "RNSideDrawerPanelView.h"
 #import "RNSideDrawerSlots.h"
 #import "RNPagerDrawerHapticFeedback.h"
@@ -10,11 +11,8 @@
 #import <React/RCTSurfaceTouchHandler.h>
 #import <React/UIView+React.h>
 #import <QuartzCore/QuartzCore.h>
-#include <algorithm>
-#include <array>
 #include <float.h>
 #import <math.h>
-#include <vector>
 
 typedef NS_ENUM(NSInteger, RNSideDrawerPhase) {
   RNSideDrawerPhaseClosed,
@@ -28,53 +26,6 @@ typedef NS_ENUM(NSInteger, RNSideDrawerSettlingSource) {
   RNSideDrawerSettlingSourceProgrammatic,
   RNSideDrawerSettlingSourceRelease,
 };
-
-typedef NS_ENUM(NSUInteger, RNSideDrawerMotionChannel) {
-  RNSideDrawerMotionDrawerOpacity,
-  RNSideDrawerMotionDrawerScale,
-  RNSideDrawerMotionDrawerTranslateX,
-  RNSideDrawerMotionDrawerTranslateY,
-  RNSideDrawerMotionContentOpacity,
-  RNSideDrawerMotionContentScale,
-  RNSideDrawerMotionContentTranslateX,
-  RNSideDrawerMotionContentTranslateY,
-  RNSideDrawerMotionOverlayOpacity,
-  RNSideDrawerMotionContentBorderOpacity,
-  RNSideDrawerMotionContentShadowOpacity,
-  RNSideDrawerMotionChannelCount,
-};
-
-struct RNSideDrawerMotionSegment {
-  CGFloat upperInput;
-  CGFloat slope;
-  CGFloat intercept;
-};
-
-struct RNSideDrawerInterpolation {
-  bool enabled{false};
-  CGFloat firstInput{0};
-  CGFloat firstOutput{0};
-  CGFloat lastInput{0};
-  CGFloat lastOutput{0};
-  std::vector<RNSideDrawerMotionSegment> segments;
-
-  CGFloat evaluate(CGFloat progress, CGFloat fallback) const
-  {
-    if (!enabled) return fallback;
-    if (progress <= firstInput) return firstOutput;
-    if (progress >= lastInput) return lastOutput;
-    auto segment = std::lower_bound(
-        segments.begin(),
-        segments.end(),
-        progress,
-        [](const RNSideDrawerMotionSegment &candidate, CGFloat value) {
-          return candidate.upperInput < value;
-        });
-    return segment->slope * progress + segment->intercept;
-  }
-};
-
-using RNSideDrawerMotion = std::array<RNSideDrawerInterpolation, RNSideDrawerMotionChannelCount>;
 
 static UIGestureRecognizer *RNSideDrawerFindReactTouchHandler(UIView *view)
 {
@@ -268,7 +219,7 @@ static void RNSideDrawerCancelTouchedHorizontalScrollPans(
   CFTimeInterval _lastSettleTime;
   rnsidedrawer::InteractionConfiguration _configuredInteraction;
   rnsidedrawer::Interaction _activeInteraction;
-  RNSideDrawerMotion _motion;
+  rnsidedrawer::Motion _motion;
 }
 
 static const rnsidedrawer::InteractionConfiguration kDefaultInteractionConfiguration =
@@ -277,14 +228,6 @@ static const rnsidedrawer::InteractionConfiguration kDefaultInteractionConfigura
 static CGFloat RNSideDrawerClamp(CGFloat value, CGFloat minimum, CGFloat maximum)
 {
   return MIN(maximum, MAX(minimum, value));
-}
-
-static bool RNSideDrawerHasMotion(const RNSideDrawerMotion &motion)
-{
-  for (const auto &interpolation : motion) {
-    if (interpolation.enabled) return true;
-  }
-  return false;
 }
 
 static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
@@ -302,51 +245,6 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
   } @catch (__unused NSException *exception) {
     return 0;
   }
-}
-
-static RNSideDrawerMotion RNSideDrawerCompileMotion(NSArray<NSNumber *> *config)
-{
-  RNSideDrawerMotion motion{};
-  if (config.count < RNSideDrawerMotionChannelCount) return motion;
-
-  NSUInteger cursor = RNSideDrawerMotionChannelCount;
-  for (NSUInteger channelIndex = 0; channelIndex < RNSideDrawerMotionChannelCount; channelIndex += 1) {
-    double rawPointCount = config[channelIndex].doubleValue;
-    NSUInteger pointCount = rawPointCount >= 0 ? (NSUInteger)rawPointCount : NSNotFound;
-    if (!isfinite(rawPointCount) || rawPointCount != pointCount || pointCount == 1 || cursor + pointCount * 2 > config.count) {
-      return RNSideDrawerMotion{};
-    }
-    if (pointCount == 0) continue;
-
-    RNSideDrawerInterpolation &interpolation = motion[channelIndex];
-    interpolation.enabled = true;
-    interpolation.firstInput = config[cursor].doubleValue;
-    interpolation.firstOutput = config[cursor + 1].doubleValue;
-    interpolation.lastInput = interpolation.firstInput;
-    interpolation.lastOutput = interpolation.firstOutput;
-    if (!isfinite(interpolation.firstInput) || !isfinite(interpolation.firstOutput) || interpolation.firstInput < 0 ||
-        interpolation.firstInput > 1) {
-      return RNSideDrawerMotion{};
-    }
-
-    CGFloat previousInput = interpolation.firstInput;
-    CGFloat previousOutput = interpolation.firstOutput;
-    cursor += 2;
-    interpolation.segments.reserve(pointCount - 1);
-    for (NSUInteger pointIndex = 1; pointIndex < pointCount; pointIndex += 1) {
-      CGFloat input = config[cursor].doubleValue;
-      CGFloat output = config[cursor + 1].doubleValue;
-      if (!isfinite(input) || !isfinite(output) || input <= previousInput || input > 1) return RNSideDrawerMotion{};
-      CGFloat slope = (output - previousOutput) / (input - previousInput);
-      interpolation.segments.push_back({input, slope, previousOutput - slope * previousInput});
-      interpolation.lastInput = input;
-      interpolation.lastOutput = output;
-      previousInput = input;
-      previousOutput = output;
-      cursor += 2;
-    }
-  }
-  return cursor == config.count ? motion : RNSideDrawerMotion{};
 }
 
 - (instancetype)initWithFrame:(CGRect)frame
@@ -711,7 +609,7 @@ static RNSideDrawerMotion RNSideDrawerCompileMotion(NSArray<NSNumber *> *config)
 - (void)setMotionConfig:(NSArray<NSNumber *> *)motionConfig
 {
   _motionConfig = [motionConfig copy];
-  _motion = RNSideDrawerCompileMotion(_motionConfig);
+  _motion = rnsidedrawer::compileMotion(_motionConfig);
   if (!_hasLaidOut) return;
   if (_phase == RNSideDrawerPhaseSettling) {
     CGFloat reveal = [self presentationReveal];
@@ -1332,20 +1230,20 @@ static RNSideDrawerMotion RNSideDrawerCompileMotion(NSArray<NSNumber *> *config)
 
 - (void)applyMotionProgress:(CGFloat)progress
 {
-  CGFloat drawerOpacity = _motion[RNSideDrawerMotionDrawerOpacity].evaluate(progress, 1);
-  CGFloat drawerScale = _motion[RNSideDrawerMotionDrawerScale].evaluate(progress, 1);
-  CGFloat drawerTranslateX = _motion[RNSideDrawerMotionDrawerTranslateX].evaluate(progress, 0);
-  CGFloat drawerTranslateY = _motion[RNSideDrawerMotionDrawerTranslateY].evaluate(progress, 0);
+  CGFloat drawerOpacity = _motion.evaluate(rnsidedrawer::MotionChannel::DrawerOpacity, progress, 1);
+  CGFloat drawerScale = _motion.evaluate(rnsidedrawer::MotionChannel::DrawerScale, progress, 1);
+  CGFloat drawerTranslateX = _motion.evaluate(rnsidedrawer::MotionChannel::DrawerTranslationX, progress, 0);
+  CGFloat drawerTranslateY = _motion.evaluate(rnsidedrawer::MotionChannel::DrawerTranslationY, progress, 0);
   CGFloat boundedDrawerOpacity = RNSideDrawerClamp(drawerOpacity, 0, 1);
   CGAffineTransform drawerTransform =
       CGAffineTransformMake(drawerScale, 0, 0, drawerScale, drawerTranslateX, drawerTranslateY);
   if (_panelView.alpha != boundedDrawerOpacity) _panelView.alpha = boundedDrawerOpacity;
   if (!CGAffineTransformEqualToTransform(_panelView.transform, drawerTransform)) _panelView.transform = drawerTransform;
 
-  CGFloat contentOpacity = _motion[RNSideDrawerMotionContentOpacity].evaluate(progress, 1);
-  CGFloat contentScale = _motion[RNSideDrawerMotionContentScale].evaluate(progress, 1);
-  CGFloat contentTranslateX = _motion[RNSideDrawerMotionContentTranslateX].evaluate(progress, 0);
-  CGFloat contentTranslateY = _motion[RNSideDrawerMotionContentTranslateY].evaluate(progress, 0);
+  CGFloat contentOpacity = _motion.evaluate(rnsidedrawer::MotionChannel::ContentOpacity, progress, 1);
+  CGFloat contentScale = _motion.evaluate(rnsidedrawer::MotionChannel::ContentScale, progress, 1);
+  CGFloat contentTranslateX = _motion.evaluate(rnsidedrawer::MotionChannel::ContentTranslationX, progress, 0);
+  CGFloat contentTranslateY = _motion.evaluate(rnsidedrawer::MotionChannel::ContentTranslationY, progress, 0);
   CGFloat boundedContentOpacity = RNSideDrawerClamp(contentOpacity, 0, 1);
   CGAffineTransform contentTransform =
       CGAffineTransformMake(contentScale, 0, 0, contentScale, contentTranslateX, contentTranslateY);
@@ -1353,11 +1251,11 @@ static RNSideDrawerMotion RNSideDrawerCompileMotion(NSArray<NSNumber *> *config)
   if (!CGAffineTransformEqualToTransform(_contentPresentationView.transform, contentTransform)) {
     _contentPresentationView.transform = contentTransform;
   }
-  [_contentView setDrawerOverlayOpacity:_motion[RNSideDrawerMotionOverlayOpacity].evaluate(progress, 0)];
-  CGFloat borderOpacity = _motion[RNSideDrawerMotionContentBorderOpacity].evaluate(progress, 1);
+  [_contentView setDrawerOverlayOpacity:_motion.evaluate(rnsidedrawer::MotionChannel::OverlayOpacity, progress, 0)];
+  CGFloat borderOpacity = _motion.evaluate(rnsidedrawer::MotionChannel::ContentBorderOpacity, progress, 1);
   CGFloat boundedBorderOpacity = RNSideDrawerClamp(borderOpacity, 0, 1);
   if (_contentBorderLayer.opacity != boundedBorderOpacity) _contentBorderLayer.opacity = boundedBorderOpacity;
-  CGFloat shadowOpacity = _motion[RNSideDrawerMotionContentShadowOpacity].evaluate(progress, 1);
+  CGFloat shadowOpacity = _motion.evaluate(rnsidedrawer::MotionChannel::ContentShadowOpacity, progress, 1);
   CGFloat boundedShadowOpacity = RNSideDrawerClamp(shadowOpacity, 0, 1);
   if (_contentPresentationView.layer.shadowOpacity != boundedShadowOpacity) {
     _contentPresentationView.layer.shadowOpacity = boundedShadowOpacity;
@@ -1432,7 +1330,7 @@ static RNSideDrawerMotion RNSideDrawerCompileMotion(NSArray<NSNumber *> *config)
 - (void)updateSettleDisplayLink
 {
   BOOL active = _settleActive && _phase == RNSideDrawerPhaseSettling;
-  BOOL needed = _settlePausedForTracking || _progressEventsEnabled || RNSideDrawerHasMotion(_motion);
+  BOOL needed = _settlePausedForTracking || _progressEventsEnabled || _motion.hasInterpolations();
   if (active && needed) {
     [self startSettleDisplayLink];
   } else {
@@ -1465,7 +1363,7 @@ static RNSideDrawerMotion RNSideDrawerCompileMotion(NSArray<NSNumber *> *config)
     return;
   }
   CGFloat reveal = [self presentationReveal];
-  if (RNSideDrawerHasMotion(_motion)) {
+  if (_motion.hasInterpolations()) {
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
     [self applyMotionProgress:RNSideDrawerClamp(reveal / MAX(_laidOutDrawerWidth, 1), 0, 1)];

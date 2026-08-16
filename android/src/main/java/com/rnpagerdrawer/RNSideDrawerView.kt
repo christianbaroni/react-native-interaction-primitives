@@ -39,37 +39,6 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
         Release,
     }
 
-    private class MotionSegment(
-        val upperInput: Float,
-        val slope: Float,
-        val intercept: Float,
-    )
-
-    private class MotionInterpolation(
-        val firstInput: Float,
-        val firstOutput: Float,
-        val lastInput: Float,
-        val lastOutput: Float,
-        val segments: Array<MotionSegment>,
-    ) {
-        fun evaluate(progress: Float): Float {
-            if (progress <= firstInput) return firstOutput
-            if (progress >= lastInput) return lastOutput
-            var lower = 0
-            var upper = segments.lastIndex
-            while (lower < upper) {
-                val middle = (lower + upper) ushr 1
-                if (progress <= segments[middle].upperInput) {
-                    upper = middle
-                } else {
-                    lower = middle + 1
-                }
-            }
-            val segment = segments[lower]
-            return segment.slope * progress + segment.intercept
-        }
-    }
-
     private val slots = ArrayList<View>(2)
     private val choreographer = Choreographer.getInstance()
     private val contentPresentationView = RNSideDrawerContentPresentationView(reactContext)
@@ -116,7 +85,7 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
     private var highFrameRateRequested = false
     private var progressSnapshotPending = false
     private var velocityTracker: VelocityTracker? = null
-    private var motion = arrayOfNulls<MotionInterpolation>(MOTION_CHANNEL_COUNT)
+    private var motion = SideDrawerMotion.EMPTY
     private var overlayColor = Color.TRANSPARENT
 
     private val settleFrameCallback = object : Choreographer.FrameCallback {
@@ -552,7 +521,7 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
     }
 
     fun setMotionConfig(config: ReadableArray?) {
-        motion = compileMotion(config) ?: arrayOfNulls(MOTION_CHANNEL_COUNT)
+        motion = SideDrawerMotion.compile(config, resources.displayMetrics.density)
         if (hasLaidOut) applyProgress()
     }
 
@@ -592,7 +561,7 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
         targetOpen = false
         phase = Phase.Closed
         settlingSource = SettlingSource.None
-        motion = arrayOfNulls(MOTION_CHANNEL_COUNT)
+        motion = SideDrawerMotion.EMPTY
         contentCornerRadiusPx = -1f
         contentShadowColor = Color.TRANSPARENT
         contentShadowElevationPx = 0f
@@ -906,63 +875,6 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
         view.setRequestedFrameRate(frameRate)
     }
 
-    private fun compileMotion(config: ReadableArray?): Array<MotionInterpolation?>? {
-        if (config == null || config.size() < MOTION_CHANNEL_COUNT) return null
-        val compiled = arrayOfNulls<MotionInterpolation>(MOTION_CHANNEL_COUNT)
-        var cursor = MOTION_CHANNEL_COUNT
-        for (channel in 0 until MOTION_CHANNEL_COUNT) {
-            val rawPointCount = config.getDouble(channel)
-            val pointCount = rawPointCount.toInt()
-            if (!rawPointCount.isFinite() || rawPointCount != pointCount.toDouble() || pointCount < 0 || pointCount == 1) {
-                return null
-            }
-            if (cursor + pointCount * 2 > config.size()) return null
-            if (pointCount == 0) continue
-
-            val outputScale = if (
-                channel == DRAWER_TRANSLATE_X || channel == DRAWER_TRANSLATE_Y ||
-                channel == CONTENT_TRANSLATE_X || channel == CONTENT_TRANSLATE_Y
-            ) {
-                resources.displayMetrics.density
-            } else {
-                1f
-            }
-            val firstInput = config.getDouble(cursor).toFloat()
-            val firstOutput = config.getDouble(cursor + 1).toFloat() * outputScale
-            if (!firstInput.isFinite() || !firstOutput.isFinite() || firstInput !in 0f..1f) return null
-            var previousInput = firstInput
-            var previousOutput = firstOutput
-            var lastInput = firstInput
-            var lastOutput = firstOutput
-            cursor += 2
-            val segments = ArrayList<MotionSegment>(pointCount - 1)
-            repeat(pointCount - 1) {
-                val input = config.getDouble(cursor).toFloat()
-                val output = config.getDouble(cursor + 1).toFloat() * outputScale
-                if (!input.isFinite() || !output.isFinite() || input <= previousInput || input > 1f) return null
-                val slope = (output - previousOutput) / (input - previousInput)
-                segments.add(MotionSegment(input, slope, previousOutput - slope * previousInput))
-                previousInput = input
-                previousOutput = output
-                lastInput = input
-                lastOutput = output
-                cursor += 2
-            }
-            compiled[channel] = MotionInterpolation(
-                firstInput,
-                firstOutput,
-                lastInput,
-                lastOutput,
-                segments.toTypedArray(),
-            )
-        }
-        return if (cursor == config.size()) compiled else null
-    }
-
-    private fun motionValue(channel: Int, progress: Float, fallback: Float): Float {
-        return motion[channel]?.evaluate(progress) ?: fallback
-    }
-
     private fun applyProgress() {
         val currentProgress = if (laidOutDrawerWidthPx > 0f) {
             (revealPx / laidOutDrawerWidthPx).coerceIn(0f, 1f)
@@ -970,10 +882,10 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
             0f
         }
         val panel = panelView
-        val drawerOpacity = motionValue(DRAWER_OPACITY, currentProgress, 1f).coerceIn(0f, 1f)
-        val drawerScale = motionValue(DRAWER_SCALE, currentProgress, 1f)
-        val drawerTranslationX = motionValue(DRAWER_TRANSLATE_X, currentProgress, 0f)
-        val drawerTranslationY = motionValue(DRAWER_TRANSLATE_Y, currentProgress, 0f)
+        val drawerOpacity = motion.evaluate(SideDrawerMotionChannel.DrawerOpacity, currentProgress, 1f).coerceIn(0f, 1f)
+        val drawerScale = motion.evaluate(SideDrawerMotionChannel.DrawerScale, currentProgress, 1f)
+        val drawerTranslationX = motion.evaluate(SideDrawerMotionChannel.DrawerTranslationX, currentProgress, 0f)
+        val drawerTranslationY = motion.evaluate(SideDrawerMotionChannel.DrawerTranslationY, currentProgress, 0f)
         if (panel != null) {
             if (panel.alpha != drawerOpacity) panel.alpha = drawerOpacity
             if (panel.scaleX != drawerScale) panel.scaleX = drawerScale
@@ -983,11 +895,14 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
         }
 
         val content = contentView
-        val contentOpacity = motionValue(CONTENT_OPACITY, currentProgress, 1f).coerceIn(0f, 1f)
-        val contentScale = motionValue(CONTENT_SCALE, currentProgress, 1f)
+        val contentOpacity =
+            motion.evaluate(SideDrawerMotionChannel.ContentOpacity, currentProgress, 1f).coerceIn(0f, 1f)
+        val contentScale = motion.evaluate(SideDrawerMotionChannel.ContentScale, currentProgress, 1f)
         val contentTranslationX =
-            revealDirection() * revealPx + motionValue(CONTENT_TRANSLATE_X, currentProgress, 0f)
-        val contentTranslationY = motionValue(CONTENT_TRANSLATE_Y, currentProgress, 0f)
+            revealDirection() * revealPx +
+                motion.evaluate(SideDrawerMotionChannel.ContentTranslationX, currentProgress, 0f)
+        val contentTranslationY =
+            motion.evaluate(SideDrawerMotionChannel.ContentTranslationY, currentProgress, 0f)
         if (contentPresentationView.scaleX != contentScale) contentPresentationView.scaleX = contentScale
         if (contentPresentationView.scaleY != contentScale) contentPresentationView.scaleY = contentScale
         if (contentPresentationView.translationX != contentTranslationX) {
@@ -996,11 +911,17 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
         if (contentPresentationView.translationY != contentTranslationY) {
             contentPresentationView.translationY = contentTranslationY
         }
-        contentPresentationView.setShadowOpacity(motionValue(CONTENT_SHADOW_OPACITY, currentProgress, 1f))
+        contentPresentationView.setShadowOpacity(
+            motion.evaluate(SideDrawerMotionChannel.ContentShadowOpacity, currentProgress, 1f),
+        )
         if (content != null) {
             if (content.alpha != contentOpacity) content.alpha = contentOpacity
-            content.setDrawerOverlayOpacity(motionValue(OVERLAY_OPACITY, currentProgress, 0f))
-            content.setDrawerBorderOpacity(motionValue(CONTENT_BORDER_OPACITY, currentProgress, 1f))
+            content.setDrawerOverlayOpacity(
+                motion.evaluate(SideDrawerMotionChannel.OverlayOpacity, currentProgress, 0f),
+            )
+            content.setDrawerBorderOpacity(
+                motion.evaluate(SideDrawerMotionChannel.ContentBorderOpacity, currentProgress, 1f),
+            )
             content.setDrawerProgress(currentProgress)
         }
         val panelEnabled = currentProgress > 0.001f
@@ -1084,18 +1005,6 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
     }
 
     private companion object {
-        const val DRAWER_OPACITY = 0
-        const val DRAWER_SCALE = 1
-        const val DRAWER_TRANSLATE_X = 2
-        const val DRAWER_TRANSLATE_Y = 3
-        const val CONTENT_OPACITY = 4
-        const val CONTENT_SCALE = 5
-        const val CONTENT_TRANSLATE_X = 6
-        const val CONTENT_TRANSLATE_Y = 7
-        const val OVERLAY_OPACITY = 8
-        const val CONTENT_BORDER_OPACITY = 9
-        const val CONTENT_SHADOW_OPACITY = 10
-        const val MOTION_CHANNEL_COUNT = 11
         const val INVALID_POINTER_ID = -1
         const val NANOS_PER_SECOND = 1_000_000_000.0
         const val SETTLE_POSITION_EPSILON_PX = 0.5
