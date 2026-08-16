@@ -53,6 +53,8 @@ const DEFAULT_INTERACTION: InteractionSettings = {
 
 const SPRING_PRESETS = [
   { label: 'Default', spring: DEFAULT_SPRING },
+  { label: 'Snappy', spring: { mass: 1.2, stiffness: 650, damping: 52 } },
+  { label: 'Snappier', spring: { mass: 1, stiffness: 845, damping: 58 } },
   { label: 'Crisp', spring: { mass: 0.8, stiffness: 620, damping: 42 } },
   { label: 'Weighty', spring: { mass: 1.8, stiffness: 500, damping: 58 } },
   { label: 'Bounce', spring: { mass: 1, stiffness: 420, damping: 22 } },
