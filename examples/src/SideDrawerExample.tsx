@@ -12,14 +12,17 @@ const HANDOFF_CARDS = [
   { accent: '#159A73', label: 'Last edge', detail: 'Swipe left here while open to close.' },
 ] as const;
 
-type SpringSettings = Readonly<{
-  mass: number;
-  stiffness: number;
-  damping: number;
+type SpringSettings = Required<NonNullable<SideDrawerInteraction['spring']>>;
+
+type ReleaseSettings = Required<NonNullable<SideDrawerInteraction['release']>>;
+
+type InteractionSettings = Readonly<{
+  spring: SpringSettings;
+  release: ReleaseSettings;
+  overdrag: number;
 }>;
 
-type SpringControl = Readonly<{
-  key: keyof SpringSettings;
+type NumericParameter = Readonly<{
   label: string;
   hint: string;
   minimum: number;
@@ -28,10 +31,24 @@ type SpringControl = Readonly<{
   fractionDigits: number;
 }>;
 
+type KeyedParameter<Key extends string> = NumericParameter & Readonly<{ key: Key }>;
+
 const DEFAULT_SPRING: SpringSettings = {
   mass: 1,
   stiffness: (7 * Math.PI) ** 2,
   damping: 14 * Math.PI,
+};
+
+const DEFAULT_RELEASE: ReleaseSettings = {
+  openThreshold: 0.5,
+  velocitySensitivity: 1,
+  velocityTransfer: 1,
+};
+
+const DEFAULT_INTERACTION: InteractionSettings = {
+  spring: DEFAULT_SPRING,
+  release: DEFAULT_RELEASE,
+  overdrag: 4,
 };
 
 const SPRING_PRESETS = [
@@ -41,7 +58,7 @@ const SPRING_PRESETS = [
   { label: 'Bounce', spring: { mass: 1, stiffness: 420, damping: 22 } },
 ] as const satisfies readonly Readonly<{ label: string; spring: SpringSettings }>[];
 
-const SPRING_CONTROLS: readonly SpringControl[] = [
+const SPRING_CONTROLS: readonly KeyedParameter<keyof SpringSettings>[] = [
   {
     key: 'mass',
     label: 'Mass',
@@ -71,6 +88,45 @@ const SPRING_CONTROLS: readonly SpringControl[] = [
   },
 ];
 
+const RELEASE_CONTROLS: readonly KeyedParameter<keyof ReleaseSettings>[] = [
+  {
+    key: 'openThreshold',
+    label: 'Open threshold',
+    hint: 'Projected progress that selects the open endpoint',
+    minimum: 0,
+    maximum: 1,
+    step: 0.05,
+    fractionDigits: 2,
+  },
+  {
+    key: 'velocitySensitivity',
+    label: 'Velocity sensitivity',
+    hint: 'Release velocity influence on endpoint choice',
+    minimum: 0,
+    maximum: 2,
+    step: 0.1,
+    fractionDigits: 1,
+  },
+  {
+    key: 'velocityTransfer',
+    label: 'Velocity transfer',
+    hint: 'Finger velocity carried into the settling spring',
+    minimum: 0,
+    maximum: 2,
+    step: 0.1,
+    fractionDigits: 1,
+  },
+];
+
+const OVERDRAG_CONTROL: NumericParameter = {
+  label: 'Overdrag',
+  hint: 'Gesture-derived travel beyond either endpoint',
+  minimum: 0,
+  maximum: 12,
+  step: 1,
+  fractionDigits: 0,
+};
+
 const DRAWER_MOTION: SideDrawerMotion = {
   content: {
     border: {
@@ -99,16 +155,20 @@ export function SideDrawerExample({ navigation }: { navigation: React.ReactNode 
   const insets = useSafeAreaInsets();
   const [open, setOpen] = React.useState(false);
   const [selectedItem, setSelectedItem] = React.useState<(typeof MENU_ITEMS)[number]>('Library');
-  const [spring, setSpring] = React.useState<SpringSettings>(DEFAULT_SPRING);
+  const [interaction, setInteraction] = React.useState<InteractionSettings>(DEFAULT_INTERACTION);
   const drawerWidth = Math.min(360, width * 0.76);
-  const interaction = React.useMemo<SideDrawerInteraction>(() => ({ spring }), [spring]);
+  const { spring } = interaction;
   const dampingRatio = spring.damping / (2 * Math.sqrt(spring.stiffness * spring.mass));
   const naturalFrequency = Math.sqrt(spring.stiffness / spring.mass) / (2 * Math.PI);
   const springResponse = Math.abs(dampingRatio - 1) < 0.01 ? 'Critical' : dampingRatio < 1 ? 'Underdamped' : 'Overdamped';
 
-  const changeSpring = React.useCallback((key: keyof SpringSettings, value: number) => {
-    setSpring(current => ({ ...current, [key]: value }));
-  }, []);
+  const changeSpring = (key: keyof SpringSettings, value: number) => {
+    setInteraction(current => ({ ...current, spring: { ...current.spring, [key]: value } }));
+  };
+
+  const changeRelease = (key: keyof ReleaseSettings, value: number) => {
+    setInteraction(current => ({ ...current, release: { ...current.release, [key]: value } }));
+  };
 
   return (
     <SideDrawer
@@ -152,9 +212,10 @@ export function SideDrawerExample({ navigation }: { navigation: React.ReactNode 
         >
           <View>
             <Text style={styles.kicker}>NATIVE INTERACTION LAB</Text>
-            <Text style={styles.heading}>Tune the spring</Text>
+            <Text style={styles.heading}>Tune the interaction</Text>
             <Text style={styles.detail}>
-              Change the physical parameters, then open, fling, reverse, or interrupt the drawer. Every settle remains native.
+              Change the spring, release intent, and endpoint resistance, then open, fling, reverse, or interrupt the drawer. Every settle
+              remains native.
             </Text>
           </View>
 
@@ -184,12 +245,13 @@ export function SideDrawerExample({ navigation }: { navigation: React.ReactNode 
           <View style={styles.card}>
             <View style={styles.cardHeader}>
               <View style={styles.cardHeaderCopy}>
-                <Text style={styles.cardLabel}>SPRING PARAMETERS</Text>
+                <Text style={styles.cardLabel}>INTERACTION PARAMETERS</Text>
                 <Text style={styles.cardTitle}>Live native tuning</Text>
               </View>
               <Text style={styles.drawerState}>{open ? 'OPEN' : 'CLOSED'}</Text>
             </View>
 
+            <Text style={styles.controlGroupLabel}>SPRING PRESETS</Text>
             <View style={styles.presets}>
               {SPRING_PRESETS.map(preset => {
                 const selected = springsEqual(spring, preset.spring);
@@ -198,7 +260,7 @@ export function SideDrawerExample({ navigation }: { navigation: React.ReactNode 
                     accessibilityRole="button"
                     accessibilityState={{ selected }}
                     key={preset.label}
-                    onPress={() => setSpring(preset.spring)}
+                    onPress={() => setInteraction(current => ({ ...current, spring: preset.spring }))}
                     style={({ pressed }) => [styles.preset, selected && styles.presetSelected, pressed && styles.controlPressed]}
                   >
                     <Text style={[styles.presetLabel, selected && styles.presetLabelSelected]}>{preset.label}</Text>
@@ -207,15 +269,39 @@ export function SideDrawerExample({ navigation }: { navigation: React.ReactNode 
               })}
             </View>
 
+            <Text style={styles.controlGroupLabel}>SPRING</Text>
             <View style={styles.parameters}>
               {SPRING_CONTROLS.map(control => (
-                <SpringParameterControl
+                <NumericParameterControl
                   control={control}
                   key={control.key}
                   onChange={value => changeSpring(control.key, value)}
                   value={spring[control.key]}
                 />
               ))}
+            </View>
+
+            <View style={styles.controlGroupDivider} />
+            <Text style={styles.controlGroupLabel}>RELEASE</Text>
+            <View style={styles.parameters}>
+              {RELEASE_CONTROLS.map(control => (
+                <NumericParameterControl
+                  control={control}
+                  key={control.key}
+                  onChange={value => changeRelease(control.key, value)}
+                  value={interaction.release[control.key]}
+                />
+              ))}
+            </View>
+
+            <View style={styles.controlGroupDivider} />
+            <Text style={styles.controlGroupLabel}>ENDPOINT RESISTANCE</Text>
+            <View style={styles.parameters}>
+              <NumericParameterControl
+                control={OVERDRAG_CONTROL}
+                onChange={value => setInteraction(current => ({ ...current, overdrag: value }))}
+                value={interaction.overdrag}
+              />
             </View>
 
             <Text style={styles.cardBody}>
@@ -271,12 +357,12 @@ function springsEqual(left: SpringSettings, right: SpringSettings): boolean {
   );
 }
 
-function SpringParameterControl({
+function NumericParameterControl({
   control,
   onChange,
   value,
 }: {
-  control: SpringControl;
+  control: NumericParameter;
   onChange(value: number): void;
   value: number;
 }): React.JSX.Element {
@@ -375,6 +461,18 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: -0.6,
     marginTop: 6,
+  },
+  controlGroupDivider: {
+    backgroundColor: '#E2E7ED',
+    height: StyleSheet.hairlineWidth,
+    marginTop: 12,
+  },
+  controlGroupLabel: {
+    color: '#7A8491',
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.9,
+    marginTop: 20,
   },
   content: {
     backgroundColor: '#0D1014',
@@ -630,7 +728,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
-    marginTop: 18,
+    marginTop: 10,
   },
   presetSelected: {
     backgroundColor: '#1769E0',
