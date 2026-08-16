@@ -12,6 +12,10 @@ const DRAWER_MOTION: SideDrawerMotion = {
       opacity: { inputRange: [0, 0.9], outputRange: [0, 0.24] },
       width: 1,
     },
+    shadow: {
+      color: '#000000B3',
+      opacity: { inputRange: [0, 0.85, 1], outputRange: [0, 0.5, 0.55] },
+    },
   },
   drawer: {
     opacity: { inputRange: [0, 0.9], outputRange: [0.1, 1] },

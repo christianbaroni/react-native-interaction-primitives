@@ -77,6 +77,20 @@ describe('SideDrawer API', () => {
         })
       )
     ).toThrow('motion.content.border.width must be a finite number greater than or equal to zero.');
+    expect(() =>
+      render(
+        drawer(undefined, {
+          motion: { content: { shadow: { android: { elevation: -1 }, color: 'black' } } },
+        })
+      )
+    ).toThrow('motion.content.shadow.android.elevation must be a finite number greater than or equal to zero.');
+    expect(() =>
+      render(
+        drawer(undefined, {
+          motion: { content: { shadow: { color: 'black', ios: { radius: -1 } } } },
+        })
+      )
+    ).toThrow('motion.content.shadow.ios.radius must be a finite number greater than or equal to zero.');
   });
 
   it('defaults content clipping to the native screen radius', () => {
@@ -101,6 +115,56 @@ describe('SideDrawer API', () => {
     });
   });
 
+  it('omits the shadow by default and applies native geometry defaults when present', () => {
+    const { rerender } = render(drawer());
+    expect(lastNativeProps('RNSideDrawerView')).toMatchObject({
+      contentShadowColor: 'transparent',
+      contentShadowElevation: 0,
+      contentShadowOffsetX: 0,
+      contentShadowOffsetY: 0,
+      contentShadowRadius: 0,
+    });
+
+    rerender(
+      drawer(undefined, {
+        motion: {
+          content: {
+            shadow: {
+              color: '#00000088',
+            },
+          },
+        },
+      })
+    );
+    expect(lastNativeProps('RNSideDrawerView')).toMatchObject({
+      contentShadowColor: '#00000088',
+      contentShadowElevation: 16,
+      contentShadowOffsetX: 0,
+      contentShadowOffsetY: 0,
+      contentShadowRadius: 16,
+    });
+
+    rerender(
+      drawer(undefined, {
+        motion: {
+          content: {
+            shadow: {
+              android: { elevation: 0 },
+              color: '#00000088',
+              ios: { offset: { x: -3, y: 1 }, radius: 0 },
+            },
+          },
+        },
+      })
+    );
+    expect(lastNativeProps('RNSideDrawerView')).toMatchObject({
+      contentShadowElevation: 0,
+      contentShadowOffsetX: -3,
+      contentShadowOffsetY: 1,
+      contentShadowRadius: 0,
+    });
+  });
+
   it('enables release haptics only when a feedback type is present', () => {
     const { rerender } = render(drawer());
     expect(lastNativeProps('RNSideDrawerView').gestureReleaseHaptic).toBe('none');
@@ -116,6 +180,12 @@ describe('SideDrawer API', () => {
           color: '#AABBCC',
           opacity: { inputRange: [0, 0.8, 1], outputRange: [0, 0.6, 1] },
           width: 2,
+        },
+        shadow: {
+          android: { elevation: 18 },
+          color: '#00000088',
+          ios: { offset: { x: -3, y: 1 }, radius: 20 },
+          opacity: { inputRange: [0, 1], outputRange: [0, 0.8] },
         },
       },
       drawer: {
@@ -133,7 +203,12 @@ describe('SideDrawer API', () => {
     expect(lastNativeProps('RNSideDrawerView')).toMatchObject({
       contentBorderColor: '#AABBCC',
       contentBorderWidth: 2,
-      motionConfig: [2, 2, 0, 0, 0, 0, 0, 0, 2, 3, 0, 0.1, 0.9, 1, 0, 0.94, 1, 1, 0, 0, 1, 0.4, 0, 0, 0.8, 0.6, 1, 1],
+      contentShadowColor: '#00000088',
+      contentShadowElevation: 18,
+      contentShadowOffsetX: -3,
+      contentShadowOffsetY: 1,
+      contentShadowRadius: 20,
+      motionConfig: [2, 2, 0, 0, 0, 0, 0, 0, 2, 3, 2, 0, 0.1, 0.9, 1, 0, 0.94, 1, 1, 0, 0, 1, 0.4, 0, 0, 0.8, 0.6, 1, 1, 0, 0, 1, 0.8],
       overlayColor: '#112233',
     });
 

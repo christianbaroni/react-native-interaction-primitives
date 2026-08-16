@@ -253,6 +253,18 @@ static NSString *RNSideDrawerHapticValue(RNSideDrawerViewGestureReleaseHaptic va
   if (oldViewProps.contentCornerRadius != newViewProps.contentCornerRadius) {
     _drawerView.contentCornerRadius = newViewProps.contentCornerRadius;
   }
+  if (oldViewProps.contentShadowColor != newViewProps.contentShadowColor) {
+    _drawerView.contentShadowColor = RCTUIColorFromSharedColor(newViewProps.contentShadowColor);
+  }
+  if (oldViewProps.contentShadowOffsetX != newViewProps.contentShadowOffsetX) {
+    _drawerView.contentShadowOffsetX = newViewProps.contentShadowOffsetX;
+  }
+  if (oldViewProps.contentShadowOffsetY != newViewProps.contentShadowOffsetY) {
+    _drawerView.contentShadowOffsetY = newViewProps.contentShadowOffsetY;
+  }
+  if (oldViewProps.contentShadowRadius != newViewProps.contentShadowRadius) {
+    _drawerView.contentShadowRadius = newViewProps.contentShadowRadius;
+  }
   if (oldViewProps.drawerWidth != newViewProps.drawerWidth) {
     _drawerView.drawerWidth = newViewProps.drawerWidth;
   }
@@ -385,6 +397,10 @@ RCT_EXPORT_VIEW_PROPERTY(drawerWidth, CGFloat)
 RCT_EXPORT_VIEW_PROPERTY(contentBorderColor, UIColor)
 RCT_EXPORT_VIEW_PROPERTY(contentBorderWidth, CGFloat)
 RCT_EXPORT_VIEW_PROPERTY(contentCornerRadius, CGFloat)
+RCT_EXPORT_VIEW_PROPERTY(contentShadowColor, UIColor)
+RCT_EXPORT_VIEW_PROPERTY(contentShadowOffsetX, CGFloat)
+RCT_EXPORT_VIEW_PROPERTY(contentShadowOffsetY, CGFloat)
+RCT_EXPORT_VIEW_PROPERTY(contentShadowRadius, CGFloat)
 RCT_EXPORT_VIEW_PROPERTY(gestureEnabled, BOOL)
 RCT_EXPORT_VIEW_PROPERTY(gestureReleaseHaptic, NSString)
 RCT_EXPORT_VIEW_PROPERTY(initialOpen, BOOL)
@@ -394,6 +410,13 @@ RCT_EXPORT_VIEW_PROPERTY(overlayColor, UIColor)
 RCT_EXPORT_VIEW_PROPERTY(progressEventsEnabled, BOOL)
 RCT_EXPORT_VIEW_PROPERTY(onOpenChange, RCTDirectEventBlock)
 RCT_EXPORT_VIEW_PROPERTY(onProgress, RCTDirectEventBlock)
+
+RCT_CUSTOM_VIEW_PROPERTY(contentShadowElevation, CGFloat, RNSideDrawerView)
+{
+  (void)json;
+  (void)view;
+  (void)defaultView;
+}
 
 RCT_CUSTOM_VIEW_PROPERTY(side, NSString, RNSideDrawerView)
 {

@@ -73,6 +73,7 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
 
     private val slots = ArrayList<View>(2)
     private val choreographer = Choreographer.getInstance()
+    private val contentPresentationView = RNSideDrawerContentPresentationView(reactContext)
     private val targetResolverScroller = OverScroller(reactContext)
     private val viewConfiguration = ViewConfiguration.get(reactContext)
     private val touchSlop = viewConfiguration.scaledTouchSlop
@@ -145,7 +146,22 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
         set(value) {
             if (field == value) return
             field = value
-            contentView?.contentCornerRadiusPx = value
+            contentPresentationView.contentCornerRadiusPx = value
+        }
+
+    var contentShadowColor: Int = Color.TRANSPARENT
+        set(value) {
+            if (field == value) return
+            field = value
+            contentPresentationView.setShadowColor(value)
+        }
+
+    var contentShadowElevationPx: Float = 0f
+        set(value) {
+            val next = if (value.isFinite()) max(0f, value) else 0f
+            if (field == next) return
+            field = next
+            contentPresentationView.setShadowElevation(next)
         }
 
     var gestureEnabled: Boolean = true
@@ -186,6 +202,7 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
     init {
         clipChildren = true
         clipToPadding = true
+        super.addView(contentPresentationView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
     }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
@@ -196,7 +213,7 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
         val heightSpec = MeasureSpec.makeMeasureSpec(measuredHeight, MeasureSpec.EXACTLY)
         val contentWidthSpec = MeasureSpec.makeMeasureSpec(measuredWidth, MeasureSpec.EXACTLY)
         panelView?.measure(contentWidthSpec, heightSpec)
-        contentView?.measure(contentWidthSpec, heightSpec)
+        contentPresentationView.measure(contentWidthSpec, heightSpec)
     }
 
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
@@ -244,7 +261,7 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
         val hostWidth = right - left
         val hostHeight = bottom - top
         panelView?.layout(0, 0, hostWidth, hostHeight)
-        contentView?.layout(0, 0, hostWidth, hostHeight)
+        contentPresentationView.layout(0, 0, hostWidth, hostHeight)
         hasLaidOut = true
         revealPx = when {
             firstLayout -> if (initialOpen) laidOutDrawerWidthPx else 0f
@@ -392,17 +409,18 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
         if (child !is RNSideDrawerPanelView && child !is RNSideDrawerContentView) return
         val boundedIndex = index.coerceIn(0, slots.size)
         slots.add(boundedIndex, child)
-        super.addView(child, boundedIndex, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
         when (child) {
-            is RNSideDrawerPanelView -> panelView = child
+            is RNSideDrawerPanelView -> {
+                panelView = child
+                super.addView(child, 0, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+            }
             is RNSideDrawerContentView -> {
                 contentView = child
                 child.setDrawerBorderColor(contentBorderColor)
                 child.setDrawerBorderWidth(contentBorderWidthPx)
-                child.contentCornerRadiusPx = contentCornerRadiusPx
                 child.setDrawerOverlayColor(overlayColor)
                 child.onScrimPress = { close(true) }
-                child.bringToFront()
+                contentPresentationView.setContentView(child)
             }
         }
         if (highFrameRateRequested) applyRequestedFrameRate(child)
@@ -415,12 +433,15 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
 
     fun removeDrawerSlotAt(index: Int) {
         val child = slots.removeAt(index)
-        if (child === panelView) panelView = null
+        if (child === panelView) {
+            panelView = null
+            super.removeView(child)
+        }
         if (child === contentView) {
             contentView?.onScrimPress = null
             contentView = null
+            contentPresentationView.removeContentView(child as RNSideDrawerContentView)
         }
-        super.removeView(child)
     }
 
     fun open(animated: Boolean) {
@@ -451,8 +472,9 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
         setHighFrameRateRequested(false)
         finishTouch()
         contentView?.onScrimPress = null
+        panelView?.let { super.removeView(it) }
+        contentView?.let { contentPresentationView.removeContentView(it) }
         slots.clear()
-        removeAllViews()
         panelView = null
         contentView = null
         hasLaidOut = false
@@ -461,6 +483,11 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
         targetOpen = false
         phase = Phase.Closed
         settlingSource = SettlingSource.None
+        motion = arrayOfNulls(MOTION_CHANNEL_COUNT)
+        contentCornerRadiusPx = -1f
+        contentShadowColor = Color.TRANSPARENT
+        contentShadowElevationPx = 0f
+        applyProgress()
     }
 
     private fun setOpen(nextOpen: Boolean, animated: Boolean) {
@@ -767,6 +794,7 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
         highFrameRateRequested = requested
         applyRequestedFrameRate(this)
         panelView?.let(::applyRequestedFrameRate)
+        applyRequestedFrameRate(contentPresentationView)
         contentView?.let(::applyRequestedFrameRate)
     }
 
@@ -862,12 +890,17 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
         val contentTranslationX =
             revealDirection() * revealPx + motionValue(CONTENT_TRANSLATE_X, currentProgress, 0f)
         val contentTranslationY = motionValue(CONTENT_TRANSLATE_Y, currentProgress, 0f)
+        if (contentPresentationView.scaleX != contentScale) contentPresentationView.scaleX = contentScale
+        if (contentPresentationView.scaleY != contentScale) contentPresentationView.scaleY = contentScale
+        if (contentPresentationView.translationX != contentTranslationX) {
+            contentPresentationView.translationX = contentTranslationX
+        }
+        if (contentPresentationView.translationY != contentTranslationY) {
+            contentPresentationView.translationY = contentTranslationY
+        }
+        contentPresentationView.setShadowOpacity(motionValue(CONTENT_SHADOW_OPACITY, currentProgress, 1f))
         if (content != null) {
             if (content.alpha != contentOpacity) content.alpha = contentOpacity
-            if (content.scaleX != contentScale) content.scaleX = contentScale
-            if (content.scaleY != contentScale) content.scaleY = contentScale
-            if (content.translationX != contentTranslationX) content.translationX = contentTranslationX
-            if (content.translationY != contentTranslationY) content.translationY = contentTranslationY
             content.setDrawerOverlayOpacity(motionValue(OVERLAY_OPACITY, currentProgress, 0f))
             content.setDrawerBorderOpacity(motionValue(CONTENT_BORDER_OPACITY, currentProgress, 1f))
             content.setDrawerProgress(currentProgress)
@@ -963,7 +996,8 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
         const val CONTENT_TRANSLATE_Y = 7
         const val OVERLAY_OPACITY = 8
         const val CONTENT_BORDER_OPACITY = 9
-        const val MOTION_CHANNEL_COUNT = 10
+        const val CONTENT_SHADOW_OPACITY = 10
+        const val MOTION_CHANNEL_COUNT = 11
         const val INVALID_POINTER_ID = -1
         const val NANOS_PER_SECOND = 1_000_000_000.0
         const val SETTLE_ANGULAR_FREQUENCY = 21.991148575128552

@@ -17,6 +17,11 @@ export interface NativeProps extends ViewProps {
   contentBorderColor?: ColorValue;
   contentBorderWidth?: WithDefault<Float, 0>;
   contentCornerRadius?: WithDefault<Float, -1>;
+  contentShadowColor?: ColorValue;
+  contentShadowElevation?: WithDefault<Float, 0>;
+  contentShadowOffsetX?: WithDefault<Float, 0>;
+  contentShadowOffsetY?: WithDefault<Float, 0>;
+  contentShadowRadius?: WithDefault<Float, 0>;
   drawerWidth: Float;
   gestureEnabled?: WithDefault<boolean, true>;
   gestureReleaseHaptic?: WithDefault<

@@ -86,6 +86,20 @@ export type SideDrawerMotion = Readonly<{
     }>;
     opacity?: SideDrawerInterpolation;
     scale?: SideDrawerInterpolation;
+    shadow?: Readonly<{
+      android?: Readonly<{
+        elevation?: number;
+      }>;
+      color: ColorValue;
+      ios?: Readonly<{
+        offset?: Readonly<{
+          x: number;
+          y: number;
+        }>;
+        radius?: number;
+      }>;
+      opacity?: SideDrawerInterpolation;
+    }>;
     translateX?: SideDrawerInterpolation;
     translateY?: SideDrawerInterpolation;
   }>;

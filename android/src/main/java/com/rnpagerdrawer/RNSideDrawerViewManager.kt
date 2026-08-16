@@ -73,6 +73,25 @@ internal class RNSideDrawerViewManager :
         view.contentCornerRadiusPx = if (value < 0f) value else PixelUtil.toPixelFromDIP(value)
     }
 
+    @ReactProp(name = "contentShadowColor", customType = "Color")
+    override fun setContentShadowColor(view: RNSideDrawerView, value: Int?) {
+        view.contentShadowColor = value ?: 0
+    }
+
+    @ReactProp(name = "contentShadowElevation", defaultFloat = 0f)
+    override fun setContentShadowElevation(view: RNSideDrawerView, value: Float) {
+        view.contentShadowElevationPx = PixelUtil.toPixelFromDIP(value)
+    }
+
+    @ReactProp(name = "contentShadowOffsetX", defaultFloat = 0f)
+    override fun setContentShadowOffsetX(view: RNSideDrawerView, value: Float) = Unit
+
+    @ReactProp(name = "contentShadowOffsetY", defaultFloat = 0f)
+    override fun setContentShadowOffsetY(view: RNSideDrawerView, value: Float) = Unit
+
+    @ReactProp(name = "contentShadowRadius", defaultFloat = 0f)
+    override fun setContentShadowRadius(view: RNSideDrawerView, value: Float) = Unit
+
     @ReactProp(name = "gestureEnabled", defaultBoolean = true)
     override fun setGestureEnabled(view: RNSideDrawerView, value: Boolean) {
         view.gestureEnabled = value

@@ -12,6 +12,10 @@ typedef NS_ENUM(NSInteger, RNSideDrawerSide) {
 @property (nonatomic, strong) UIColor *contentBorderColor;
 @property (nonatomic, assign) CGFloat contentBorderWidth;
 @property (nonatomic, assign) CGFloat contentCornerRadius;
+@property (nonatomic, strong) UIColor *contentShadowColor;
+@property (nonatomic, assign) CGFloat contentShadowOffsetX;
+@property (nonatomic, assign) CGFloat contentShadowOffsetY;
+@property (nonatomic, assign) CGFloat contentShadowRadius;
 @property (nonatomic, assign) CGFloat drawerWidth;
 @property (nonatomic, assign) BOOL gestureEnabled;
 @property (nonatomic, copy) NSString *gestureReleaseHaptic;

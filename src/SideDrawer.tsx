@@ -6,6 +6,9 @@ import NativeSideDrawerView, { Commands, type NativeSideDrawerOpenChange } from 
 import { compileSideDrawerMotion } from './sideDrawerMotion';
 import type { SideDrawerCommandOptions, SideDrawerProps, SideDrawerRef } from './types';
 
+const DEFAULT_ANDROID_SHADOW_ELEVATION = 16;
+const DEFAULT_IOS_SHADOW_RADIUS = 16;
+
 type NativeSideDrawerRef = React.ComponentRef<typeof NativeSideDrawerView> | null;
 type NativeSideDrawerEvent<T> = Readonly<{ nativeEvent: T }>;
 type SideDrawerClass = React.ComponentClass<SideDrawerProps> & {
@@ -91,6 +94,20 @@ class SideDrawerImplementation extends React.PureComponent<SideDrawerProps> impl
     if (contentCornerRadius != null) requireNonNegativeFinite(contentCornerRadius, 'contentCornerRadius');
     const contentBorder = motion?.content?.border;
     if (contentBorder?.width != null) requireNonNegativeFinite(contentBorder.width, 'motion.content.border.width');
+    const contentShadow = motion?.content?.shadow;
+    if (contentShadow?.android?.elevation != null) {
+      requireNonNegativeFinite(contentShadow.android.elevation, 'motion.content.shadow.android.elevation');
+    }
+    if (contentShadow?.ios?.radius != null) {
+      requireNonNegativeFinite(contentShadow.ios.radius, 'motion.content.shadow.ios.radius');
+    }
+    if (contentShadow?.ios != null) {
+      const offset = contentShadow.ios.offset;
+      if (offset != null) {
+        if (!Number.isFinite(offset.x)) throw new RangeError('motion.content.shadow.ios.offset.x must be finite.');
+        if (!Number.isFinite(offset.y)) throw new RangeError('motion.content.shadow.ios.offset.y must be finite.');
+      }
+    }
     const motionConfig = this.motionConfigFor(motion);
 
     // Reanimated Paper subscriptions use RN's normalized top* event name.
@@ -102,6 +119,11 @@ class SideDrawerImplementation extends React.PureComponent<SideDrawerProps> impl
         contentBorderColor={contentBorder?.color ?? 'transparent'}
         contentBorderWidth={contentBorder == null ? 0 : (contentBorder.width ?? 1)}
         contentCornerRadius={contentCornerRadius ?? -1}
+        contentShadowColor={contentShadow?.color ?? 'transparent'}
+        contentShadowElevation={contentShadow == null ? 0 : (contentShadow.android?.elevation ?? DEFAULT_ANDROID_SHADOW_ELEVATION)}
+        contentShadowOffsetX={contentShadow?.ios?.offset?.x ?? 0}
+        contentShadowOffsetY={contentShadow?.ios?.offset?.y ?? 0}
+        contentShadowRadius={contentShadow == null ? 0 : (contentShadow.ios?.radius ?? DEFAULT_IOS_SHADOW_RADIUS)}
         drawerWidth={drawerWidth}
         gestureEnabled={gestureEnabled}
         gestureReleaseHaptic={gestureReleaseHaptic}

@@ -11,6 +11,7 @@ const CHANNEL_PATHS = [
   'motion.content.translateY',
   'motion.overlay.opacity',
   'motion.content.border.opacity',
+  'motion.content.shadow.opacity',
 ] as const;
 
 const EMPTY_CONFIG = Object.freeze(Array<number>(CHANNEL_PATHS.length).fill(0));
@@ -29,6 +30,7 @@ export function compileSideDrawerMotion(motion: SideDrawerMotion | undefined): r
     motion.content?.translateY,
     motion.overlay?.opacity,
     motion.content?.border?.opacity,
+    motion.content?.shadow?.opacity,
   ];
 
   const config = Array<number>(CHANNEL_PATHS.length).fill(0);
