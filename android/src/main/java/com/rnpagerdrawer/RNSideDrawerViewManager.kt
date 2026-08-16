@@ -122,6 +122,11 @@ internal class RNSideDrawerViewManager :
         view.openChangeEventsEnabled = value
     }
 
+    @ReactProp(name = "overdrag", defaultDouble = 4.0)
+    override fun setOverdrag(view: RNSideDrawerView, value: Double) {
+        view.overdragPx = PixelUtil.toPixelFromDIP(value)
+    }
+
     @ReactProp(name = "overlayColor", customType = "Color")
     override fun setOverlayColor(view: RNSideDrawerView, value: Int?) {
         view.setOverlayColor(value)
@@ -132,9 +137,39 @@ internal class RNSideDrawerViewManager :
         view.progressEventsEnabled = value
     }
 
+    @ReactProp(name = "releaseOpenThreshold", defaultDouble = 0.5)
+    override fun setReleaseOpenThreshold(view: RNSideDrawerView, value: Double) {
+        view.releaseOpenThreshold = value
+    }
+
+    @ReactProp(name = "releaseVelocitySensitivity", defaultDouble = 1.0)
+    override fun setReleaseVelocitySensitivity(view: RNSideDrawerView, value: Double) {
+        view.releaseVelocitySensitivity = value
+    }
+
+    @ReactProp(name = "releaseVelocityTransfer", defaultDouble = 1.0)
+    override fun setReleaseVelocityTransfer(view: RNSideDrawerView, value: Double) {
+        view.releaseVelocityTransfer = value
+    }
+
     @ReactProp(name = "side")
     override fun setSide(view: RNSideDrawerView, value: String?) {
         view.side = if (value == "end") RNSideDrawerView.Side.End else RNSideDrawerView.Side.Start
+    }
+
+    @ReactProp(name = "springDamping", defaultDouble = 43.982297150257104)
+    override fun setSpringDamping(view: RNSideDrawerView, value: Double) {
+        view.springDamping = value
+    }
+
+    @ReactProp(name = "springMass", defaultDouble = 1.0)
+    override fun setSpringMass(view: RNSideDrawerView, value: Double) {
+        view.springMass = value
+    }
+
+    @ReactProp(name = "springStiffness", defaultDouble = 483.61061565337855)
+    override fun setSpringStiffness(view: RNSideDrawerView, value: Double) {
+        view.springStiffness = value
     }
 
     override fun close(view: RNSideDrawerView, animated: Boolean) {

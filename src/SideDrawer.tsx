@@ -8,6 +8,13 @@ import type { SideDrawerCommandOptions, SideDrawerProps, SideDrawerRef } from '.
 
 const DEFAULT_ANDROID_SHADOW_ELEVATION = 16;
 const DEFAULT_IOS_SHADOW_RADIUS = 16;
+const DEFAULT_OVERDRAG = 4;
+const DEFAULT_RELEASE_OPEN_THRESHOLD = 0.5;
+const DEFAULT_RELEASE_VELOCITY_SENSITIVITY = 1;
+const DEFAULT_RELEASE_VELOCITY_TRANSFER = 1;
+const DEFAULT_SPRING_DAMPING = 14 * Math.PI;
+const DEFAULT_SPRING_MASS = 1;
+const DEFAULT_SPRING_STIFFNESS = (7 * Math.PI) ** 2;
 
 type NativeSideDrawerRef = React.ComponentRef<typeof NativeSideDrawerView> | null;
 type NativeSideDrawerEvent<T> = Readonly<{ nativeEvent: T }>;
@@ -27,6 +34,20 @@ function requirePositiveFinite(value: number, name: string): void {
 function requireNonNegativeFinite(value: number, name: string): void {
   if (!Number.isFinite(value) || value < 0) {
     throw new RangeError(`${name} must be a finite number greater than or equal to zero.`);
+  }
+}
+
+function requireUnitInterval(value: number, name: string): void {
+  if (!Number.isFinite(value) || value < 0 || value > 1) {
+    throw new RangeError(`${name} must be a finite number between zero and one.`);
+  }
+}
+
+function requireFiniteSpringDynamics(mass: number, stiffness: number, damping: number): void {
+  const frequencySquared = stiffness / mass;
+  const decayRate = mass > 1 ? damping / mass / 2 : damping / 2 / mass;
+  if (!Number.isFinite(frequencySquared) || frequencySquared <= 0 || !Number.isFinite(decayRate) || decayRate <= 0) {
+    throw new RangeError('interaction.spring must produce finite positive frequency and damping.');
   }
 }
 
@@ -82,6 +103,7 @@ class SideDrawerImplementation extends React.PureComponent<SideDrawerProps> impl
       gestureEnabled = true,
       gestureReleaseHaptic = 'none',
       initialOpen = false,
+      interaction,
       motion,
       onOpenChange,
       onProgress,
@@ -108,6 +130,21 @@ class SideDrawerImplementation extends React.PureComponent<SideDrawerProps> impl
         if (!Number.isFinite(offset.y)) throw new RangeError('motion.content.shadow.ios.offset.y must be finite.');
       }
     }
+    const springMass = interaction?.spring?.mass ?? DEFAULT_SPRING_MASS;
+    const springStiffness = interaction?.spring?.stiffness ?? DEFAULT_SPRING_STIFFNESS;
+    const springDamping = interaction?.spring?.damping ?? DEFAULT_SPRING_DAMPING;
+    const releaseOpenThreshold = interaction?.release?.openThreshold ?? DEFAULT_RELEASE_OPEN_THRESHOLD;
+    const releaseVelocitySensitivity = interaction?.release?.velocitySensitivity ?? DEFAULT_RELEASE_VELOCITY_SENSITIVITY;
+    const releaseVelocityTransfer = interaction?.release?.velocityTransfer ?? DEFAULT_RELEASE_VELOCITY_TRANSFER;
+    const overdrag = interaction?.overdrag ?? DEFAULT_OVERDRAG;
+    requirePositiveFinite(springMass, 'interaction.spring.mass');
+    requirePositiveFinite(springStiffness, 'interaction.spring.stiffness');
+    requirePositiveFinite(springDamping, 'interaction.spring.damping');
+    requireFiniteSpringDynamics(springMass, springStiffness, springDamping);
+    requireUnitInterval(releaseOpenThreshold, 'interaction.release.openThreshold');
+    requireNonNegativeFinite(releaseVelocitySensitivity, 'interaction.release.velocitySensitivity');
+    requireNonNegativeFinite(releaseVelocityTransfer, 'interaction.release.velocityTransfer');
+    requireNonNegativeFinite(overdrag, 'interaction.overdrag');
     const motionConfig = this.motionConfigFor(motion);
 
     // Reanimated Paper subscriptions use RN's normalized top* event name.
@@ -129,13 +166,20 @@ class SideDrawerImplementation extends React.PureComponent<SideDrawerProps> impl
         gestureReleaseHaptic={gestureReleaseHaptic}
         initialOpen={initialOpen}
         motionConfig={motionConfig}
+        overdrag={overdrag}
         onOpenChange={onOpenChange ? this.handleOpenChange : undefined}
         onProgress={onProgress}
         openChangeEventsEnabled={onOpenChange != null}
         overlayColor={motion?.overlay?.color ?? 'transparent'}
         progressEventsEnabled={onProgress != null || topProgress != null}
+        releaseOpenThreshold={releaseOpenThreshold}
+        releaseVelocitySensitivity={releaseVelocitySensitivity}
+        releaseVelocityTransfer={releaseVelocityTransfer}
         ref={this.setNativeRef}
         side={side}
+        springDamping={springDamping}
+        springMass={springMass}
+        springStiffness={springStiffness}
       >
         <NativeSideDrawerPanelView collapsable={false} style={styles.panel}>
           <View

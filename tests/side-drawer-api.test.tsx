@@ -173,6 +173,84 @@ describe('SideDrawer API', () => {
     expect(lastNativeProps('RNSideDrawerView').gestureReleaseHaptic).toBe('soft');
   });
 
+  it('maps interaction defaults and physical tuning to native scalars', () => {
+    const { rerender } = render(drawer());
+    expect(lastNativeProps('RNSideDrawerView')).toMatchObject({
+      overdrag: 4,
+      releaseOpenThreshold: 0.5,
+      releaseVelocitySensitivity: 1,
+      releaseVelocityTransfer: 1,
+      springMass: 1,
+    });
+    expect(lastNativeProps('RNSideDrawerView').springDamping).toBeCloseTo(14 * Math.PI);
+    expect(lastNativeProps('RNSideDrawerView').springStiffness).toBeCloseTo((7 * Math.PI) ** 2);
+
+    rerender(
+      drawer(undefined, {
+        interaction: {
+          overdrag: 2,
+          release: {
+            openThreshold: 0.4,
+            velocitySensitivity: 1.25,
+            velocityTransfer: 0.75,
+          },
+          spring: {
+            damping: 24,
+            mass: 1.4,
+            stiffness: 520,
+          },
+        },
+      })
+    );
+    expect(lastNativeProps('RNSideDrawerView')).toMatchObject({
+      overdrag: 2,
+      releaseOpenThreshold: 0.4,
+      releaseVelocitySensitivity: 1.25,
+      releaseVelocityTransfer: 0.75,
+      springDamping: 24,
+      springMass: 1.4,
+      springStiffness: 520,
+    });
+  });
+
+  it('rejects interaction values that cannot describe a completing native transition', () => {
+    expect(() =>
+      render(
+        drawer(undefined, {
+          interaction: { spring: { damping: 1e308, mass: 1e308, stiffness: 1e308 } },
+        })
+      )
+    ).not.toThrow();
+    expect(() => render(drawer(undefined, { interaction: { spring: { mass: 0 } } }))).toThrow(
+      'interaction.spring.mass must be a finite number greater than zero.'
+    );
+    expect(() => render(drawer(undefined, { interaction: { spring: { stiffness: Number.POSITIVE_INFINITY } } }))).toThrow(
+      'interaction.spring.stiffness must be a finite number greater than zero.'
+    );
+    expect(() => render(drawer(undefined, { interaction: { spring: { damping: 0 } } }))).toThrow(
+      'interaction.spring.damping must be a finite number greater than zero.'
+    );
+    expect(() =>
+      render(
+        drawer(undefined, {
+          interaction: { spring: { mass: Number.MIN_VALUE, stiffness: Number.MAX_VALUE } },
+        })
+      )
+    ).toThrow('interaction.spring must produce finite positive frequency and damping.');
+    expect(() => render(drawer(undefined, { interaction: { release: { openThreshold: 1.1 } } }))).toThrow(
+      'interaction.release.openThreshold must be a finite number between zero and one.'
+    );
+    expect(() => render(drawer(undefined, { interaction: { release: { velocitySensitivity: -1 } } }))).toThrow(
+      'interaction.release.velocitySensitivity must be a finite number greater than or equal to zero.'
+    );
+    expect(() => render(drawer(undefined, { interaction: { release: { velocityTransfer: -1 } } }))).toThrow(
+      'interaction.release.velocityTransfer must be a finite number greater than or equal to zero.'
+    );
+    expect(() => render(drawer(undefined, { interaction: { overdrag: -1 } }))).toThrow(
+      'interaction.overdrag must be a finite number greater than or equal to zero.'
+    );
+  });
+
   it('compiles declarative motion into one native configuration', () => {
     const motion = {
       content: {

@@ -15,10 +15,16 @@ import com.facebook.react.bridge.WritableMap
 import com.facebook.react.uimanager.ThemedReactContext
 import com.facebook.react.uimanager.UIManagerHelper
 import kotlin.math.abs
+import kotlin.math.atan2
+import kotlin.math.cos
 import kotlin.math.exp
+import kotlin.math.floor
 import kotlin.math.ln
 import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.roundToInt
+import kotlin.math.sin
+import kotlin.math.sqrt
 import kotlin.math.tanh
 
 internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : ViewGroup(reactContext) {
@@ -38,6 +44,39 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
         None,
         Programmatic,
         Release,
+    }
+
+    private enum class SpringRegime {
+        Underdamped,
+        Critical,
+        Overdamped,
+    }
+
+    private data class SpringDynamics(
+        val frequencySquared: Double,
+        val decayRate: Double,
+        val secondaryFrequency: Double,
+        val regime: SpringRegime,
+    )
+
+    private data class Spring(
+        val mass: Double,
+        val stiffness: Double,
+        val damping: Double,
+        val dynamics: SpringDynamics,
+    )
+
+    private data class Interaction(
+        val spring: Spring,
+        val overdragPx: Float,
+        val releaseOpenThreshold: Double,
+        val releaseVelocitySensitivity: Double,
+        val releaseVelocityTransfer: Double,
+    )
+
+    private class SpringState {
+        var displacement = 0.0
+        var velocity = 0.0
     }
 
     private class MotionSegment(
@@ -101,12 +140,24 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
     private var lastPointerX = 0f
     private var dragStartRawRevealPx = 0f
     private var dragRawRevealPx = 0f
+    private var dragLowerBoundPx = 0f
+    private var dragUpperBoundPx = 0f
     private var settleStartTimeNanos = 0L
     private var settleStartRevealPx = 0f
-    private var settleInitialVelocityPxPerSecond = 0f
-    private var settleVelocityPxPerSecond = 0f
+    private var settleInitialVelocityPxPerSecond = 0.0
+    private var settleVelocityPxPerSecond = 0.0
     private var settleRunning = false
     private var settlePausedForTouch = false
+    private var configuredInteraction = Interaction(
+        DEFAULT_SPRING,
+        defaultOverdragPx(),
+        DEFAULT_RELEASE_OPEN_THRESHOLD,
+        DEFAULT_RELEASE_VELOCITY_SENSITIVITY,
+        DEFAULT_RELEASE_VELOCITY_TRANSFER,
+    )
+    private var activeInteraction = configuredInteraction
+    private val settleState = SpringState()
+    private val excursionState = SpringState()
     private var highFrameRateRequested = false
     private var progressSnapshotPending = false
     private var velocityTracker: VelocityTracker? = null
@@ -126,6 +177,61 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
             if (field == next) return
             field = next
             requestLayout()
+        }
+
+    var overdragPx: Float
+        get() = configuredInteraction.overdragPx
+        set(value) {
+            val resolved = if (value.isFinite()) max(0f, value) else defaultOverdragPx()
+            configuredInteraction = configuredInteraction.copy(overdragPx = resolved)
+        }
+
+    var releaseOpenThreshold: Double
+        get() = configuredInteraction.releaseOpenThreshold
+        set(value) {
+            val resolved = if (value.isFinite() && value in 0.0..1.0) value else DEFAULT_RELEASE_OPEN_THRESHOLD
+            configuredInteraction = configuredInteraction.copy(releaseOpenThreshold = resolved)
+        }
+
+    var releaseVelocitySensitivity: Double
+        get() = configuredInteraction.releaseVelocitySensitivity
+        set(value) {
+            val resolved = if (value.isFinite() && value >= 0.0) value else DEFAULT_RELEASE_VELOCITY_SENSITIVITY
+            configuredInteraction = configuredInteraction.copy(releaseVelocitySensitivity = resolved)
+        }
+
+    var releaseVelocityTransfer: Double
+        get() = configuredInteraction.releaseVelocityTransfer
+        set(value) {
+            val resolved = if (value.isFinite() && value >= 0.0) value else DEFAULT_RELEASE_VELOCITY_TRANSFER
+            configuredInteraction = configuredInteraction.copy(releaseVelocityTransfer = resolved)
+        }
+
+    var springDamping: Double
+        get() = configuredInteraction.spring.damping
+        set(value) {
+            val spring = configuredInteraction.spring
+            configuredInteraction = configuredInteraction.copy(
+                spring = resolveSpring(spring.mass, spring.stiffness, value),
+            )
+        }
+
+    var springMass: Double
+        get() = configuredInteraction.spring.mass
+        set(value) {
+            val spring = configuredInteraction.spring
+            configuredInteraction = configuredInteraction.copy(
+                spring = resolveSpring(value, spring.stiffness, spring.damping),
+            )
+        }
+
+    var springStiffness: Double
+        get() = configuredInteraction.spring.stiffness
+        set(value) {
+            val spring = configuredInteraction.spring
+            configuredInteraction = configuredInteraction.copy(
+                spring = resolveSpring(spring.mass, value, spring.damping),
+            )
         }
 
     var contentBorderColor: Int = Color.TRANSPARENT
@@ -171,7 +277,13 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
             field = value
             if (!value) {
                 if (isDragging) {
-                    settleToOpen(progress() >= 0.5f, SettlingSource.Release, true, 0f)
+                    settleToOpen(
+                        progress() >= activeInteraction.releaseOpenThreshold,
+                        SettlingSource.Release,
+                        true,
+                        0.0,
+                        activeInteraction,
+                    )
                 } else {
                     resumePausedSettle()
                 }
@@ -256,11 +368,13 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
         val resumePaused = settlePausedForTouch
         if (settlingBeforeLayout) synchronizeSettleFrame()
         val resumeSettling = phase == Phase.Settling
-        val resumeVelocity = if (resumeSettling) settleVelocityPxPerSecond else 0f
+        val resumeVelocity = if (resumeSettling) settleVelocityPxPerSecond else 0.0
         val resumeSource = settlingSource
         val previousDrawerWidth = laidOutDrawerWidthPx
         val previousReveal = revealPx
         val previousRawReveal = dragRawRevealPx
+        val previousDragLowerBound = dragLowerBoundPx
+        val previousDragUpperBound = dragUpperBoundPx
         stopSettleFrames()
 
         laidOutDrawerWidthPx = drawerWidthPx
@@ -278,13 +392,9 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
             else -> 0f
         }
         if (phase == Phase.Dragging) {
-            val remappedRawReveal = when {
-                previousRawReveal < 0f -> previousRawReveal
-                previousRawReveal > previousDrawerWidth ->
-                    laidOutDrawerWidthPx + previousRawReveal - previousDrawerWidth
-                previousDrawerWidth > 0f -> previousRawReveal / previousDrawerWidth * laidOutDrawerWidthPx
-                else -> directRawReveal(revealPx)
-            }
+            val remappedRawReveal = remapReveal(previousRawReveal, previousDrawerWidth, laidOutDrawerWidthPx)
+            dragLowerBoundPx = remapReveal(previousDragLowerBound, previousDrawerWidth, laidOutDrawerWidthPx)
+            dragUpperBoundPx = remapReveal(previousDragUpperBound, previousDrawerWidth, laidOutDrawerWidthPx)
             reanchorDrag(lastPointerX, remappedRawReveal)
             revealPx = directReveal(remappedRawReveal)
         }
@@ -292,10 +402,10 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
 
         if (resumeSettling) {
             if (resumePaused) {
-                settleVelocityPxPerSecond = 0f
+                settleVelocityPxPerSecond = 0.0
                 settlePausedForTouch = true
             } else {
-                settleToOpen(targetOpen, resumeSource, true, resumeVelocity)
+                settleToOpen(targetOpen, resumeSource, true, resumeVelocity, activeInteraction)
             }
         } else if (firstLayout) {
             open = initialOpen
@@ -389,7 +499,13 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
             }
             MotionEvent.ACTION_CANCEL -> {
                 if (isDragging) {
-                    settleToOpen(progress() >= 0.5f, SettlingSource.Release, true, 0f)
+                    settleToOpen(
+                        progress() >= activeInteraction.releaseOpenThreshold,
+                        SettlingSource.Release,
+                        true,
+                        0.0,
+                        activeInteraction,
+                    )
                 } else {
                     resumePausedSettle()
                 }
@@ -518,7 +634,7 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
         if ((phase == Phase.Open && nextOpen) || (phase == Phase.Closed && !nextOpen)) return
         if (animated && phase == Phase.Settling && targetOpen == nextOpen) return
         if (phase == Phase.Settling) synchronizeSettleFrame()
-        val initialVelocity = if (phase == Phase.Settling) settleVelocityPxPerSecond else 0f
+        val initialVelocity = if (phase == Phase.Settling) settleVelocityPxPerSecond else 0.0
         stopSettleFrames()
         settlePausedForTouch = false
         if (isDragging) finishTouch()
@@ -526,19 +642,34 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
     }
 
     private fun settleFromRelease(velocityPxPerSecond: Float, performHaptic: Boolean) {
+        val interaction = activeInteraction
         val presentedVelocity = releaseRevealVelocity(velocityPxPerSecond)
-        val naturalReveal = naturalTargetReveal(revealPx, presentedVelocity)
-        val nextOpen = naturalReveal >= laidOutDrawerWidthPx * 0.5f
+        val naturalReveal = naturalTargetReveal(
+            revealPx,
+            presentedVelocity * interaction.releaseVelocitySensitivity,
+        )
+        val nextOpen = naturalReveal >= laidOutDrawerWidthPx * interaction.releaseOpenThreshold
         if (performHaptic && nextOpen != gestureOriginOpen) gestureReleaseHaptic?.perform(this)
-        settleToOpen(nextOpen, SettlingSource.Release, true, presentedVelocity)
+        val target = targetReveal(nextOpen)
+        val transferredVelocity = presentedVelocity * interaction.releaseVelocityTransfer
+        val boundedVelocity = boundedSettleVelocity(
+            revealPx,
+            transferredVelocity,
+            target,
+            interaction.spring.dynamics,
+            interaction.overdragPx,
+        )
+        settleToOpen(nextOpen, SettlingSource.Release, true, boundedVelocity, interaction)
     }
 
     private fun settleToOpen(
         nextOpen: Boolean,
         source: SettlingSource,
         animated: Boolean,
-        initialVelocityPxPerSecond: Float = 0f,
+        initialVelocityPxPerSecond: Double = 0.0,
+        interaction: Interaction = configuredInteraction,
     ) {
+        activeInteraction = interaction
         targetOpen = nextOpen
         settlingSource = source
         phase = Phase.Settling
@@ -551,11 +682,10 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
             finishAtOpen(nextOpen)
             return
         }
-        val boundedVelocity = boundedSettleVelocity(revealPx, initialVelocityPxPerSecond, target, overtravelLimitPx())
-        startSettle(boundedVelocity)
+        startSettle(initialVelocityPxPerSecond)
     }
 
-    private fun startSettle(velocityPxPerSecond: Float) {
+    private fun startSettle(velocityPxPerSecond: Double) {
         choreographer.removeFrameCallback(settleFrameCallback)
         settleStartRevealPx = revealPx
         settleInitialVelocityPxPerSecond = velocityPxPerSecond
@@ -571,14 +701,13 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
         val target = targetReveal(targetOpen)
         val elapsed = (frameTimeNanos - settleStartTimeNanos).coerceAtLeast(0L) / NANOS_PER_SECOND
         val initialDisplacement = (settleStartRevealPx - target).toDouble()
-        val initialVelocity = settleInitialVelocityPxPerSecond.toDouble()
-        val coefficient = initialVelocity + SETTLE_ANGULAR_FREQUENCY * initialDisplacement
-        val decay = exp(-SETTLE_ANGULAR_FREQUENCY * elapsed)
-        val displacement = (initialDisplacement + coefficient * elapsed) * decay
-        val velocity = (initialVelocity - SETTLE_ANGULAR_FREQUENCY * coefficient * elapsed) * decay
+        val initialVelocity = settleInitialVelocityPxPerSecond
+        evaluateSpring(activeInteraction.spring.dynamics, initialDisplacement, initialVelocity, elapsed, settleState)
+        val displacement = settleState.displacement
+        val velocity = settleState.velocity
 
         revealPx = target + displacement.toFloat()
-        settleVelocityPxPerSecond = velocity.toFloat()
+        settleVelocityPxPerSecond = velocity
         applyProgress()
         publishProgress()
         if (abs(displacement) <= SETTLE_POSITION_EPSILON_PX && abs(velocity) <= SETTLE_VELOCITY_EPSILON_PX_PER_SECOND) {
@@ -588,9 +717,12 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
         return true
     }
 
-    private fun naturalTargetReveal(currentReveal: Float, velocityPxPerSecond: Float): Float {
+    private fun naturalTargetReveal(currentReveal: Float, velocityPxPerSecond: Double): Float {
         val maximum = laidOutDrawerWidthPx.roundToInt()
         val boundedReveal = currentReveal.coerceIn(0f, laidOutDrawerWidthPx)
+        if (velocityPxPerSecond.isNaN()) return boundedReveal
+        if (velocityPxPerSecond >= Int.MAX_VALUE) return laidOutDrawerWidthPx
+        if (velocityPxPerSecond <= Int.MIN_VALUE) return 0f
         targetResolverScroller.forceFinished(true)
         targetResolverScroller.fling(
             boundedReveal.roundToInt(),
@@ -608,7 +740,7 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
     private fun finishAtOpen(nextOpen: Boolean) {
         stopSettleFrames()
         settlePausedForTouch = false
-        settleVelocityPxPerSecond = 0f
+        settleVelocityPxPerSecond = 0.0
         revealPx = targetReveal(nextOpen)
         open = nextOpen
         targetOpen = nextOpen
@@ -640,6 +772,7 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
         stopSettleFrames()
         settlePausedForTouch = false
         isDragging = true
+        activeInteraction = configuredInteraction
         startDragMapping(if (wasSettling) currentX else downX)
         gestureOriginOpen = interruptedTarget
         targetOpen = interruptedTarget
@@ -681,14 +814,14 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
         synchronizeSettleFrame()
         if (phase != Phase.Settling) return
         stopSettleFrames()
-        settleVelocityPxPerSecond = 0f
+        settleVelocityPxPerSecond = 0.0
         settlePausedForTouch = true
     }
 
     private fun resumePausedSettle() {
         if (!settlePausedForTouch || phase != Phase.Settling) return
         settlePausedForTouch = false
-        settleToOpen(targetOpen, settlingSource, true, 0f)
+        settleToOpen(targetOpen, settlingSource, true, 0.0, activeInteraction)
     }
 
     private fun stopSettleFrames() {
@@ -697,7 +830,9 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
     }
 
     private fun startDragMapping(currentX: Float) {
-        reanchorDrag(currentX, directRawReveal(revealPx))
+        dragLowerBoundPx = min(0f, revealPx)
+        dragUpperBoundPx = max(laidOutDrawerWidthPx, revealPx)
+        reanchorDrag(currentX, revealPx)
     }
 
     private fun reanchorDrag(currentX: Float, rawReveal: Float = dragRawRevealPx) {
@@ -729,81 +864,227 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
 
     private fun updateDragReveal(currentX: Float) {
         lastPointerX = currentX
-        setDragRawRevealPx(dragStartRawRevealPx + (currentX - dragStartX) * revealDirection())
+        var rawReveal = dragStartRawRevealPx + (currentX - dragStartX) * revealDirection()
+        if (activeInteraction.overdragPx <= 0f) {
+            val boundedReveal = rawReveal.coerceIn(dragLowerBoundPx, dragUpperBoundPx)
+            if (boundedReveal != rawReveal) {
+                dragStartRawRevealPx = boundedReveal
+                dragStartX = currentX
+                rawReveal = boundedReveal
+            }
+        }
+        setDragRawRevealPx(rawReveal)
     }
 
     private fun directReveal(rawReveal: Float): Float {
-        val limit = overtravelLimitPx()
-        if (rawReveal < 0f) return limit * tanh(rawReveal / limit)
-        if (rawReveal <= laidOutDrawerWidthPx) return rawReveal
-        return laidOutDrawerWidthPx + limit * tanh((rawReveal - laidOutDrawerWidthPx) / limit)
-    }
-
-    private fun directRawReveal(presentationReveal: Float): Float {
-        val limit = overtravelLimitPx()
-        if (presentationReveal < 0f) {
-            val normalized = (presentationReveal / limit).coerceIn(-1f + 1e-6f, 0f)
-            return limit * 0.5f * ln((1f + normalized) / (1f - normalized))
+        val overdrag = activeInteraction.overdragPx
+        if (overdrag <= 0f) return rawReveal.coerceIn(dragLowerBoundPx, dragUpperBoundPx)
+        if (rawReveal < dragLowerBoundPx) {
+            return dragLowerBoundPx + overdrag * tanh((rawReveal - dragLowerBoundPx) / overdrag)
         }
-        if (presentationReveal <= laidOutDrawerWidthPx) return presentationReveal
-        val normalized = ((presentationReveal - laidOutDrawerWidthPx) / limit).coerceIn(0f, 1f - 1e-6f)
-        return laidOutDrawerWidthPx + limit * 0.5f * ln((1f + normalized) / (1f - normalized))
+        if (rawReveal <= dragUpperBoundPx) return rawReveal
+        return dragUpperBoundPx + overdrag * tanh((rawReveal - dragUpperBoundPx) / overdrag)
     }
 
     private fun releaseRevealVelocity(velocityPxPerSecond: Float): Float {
         if (!velocityPxPerSecond.isFinite()) return 0f
-        if (dragRawRevealPx in 0f..laidOutDrawerWidthPx) return velocityPxPerSecond
-        val boundary = if (dragRawRevealPx < 0f) 0f else laidOutDrawerWidthPx
-        val normalized = tanh((dragRawRevealPx - boundary) / overtravelLimitPx())
+        val overdrag = activeInteraction.overdragPx
+        if (overdrag <= 0f) {
+            if ((dragRawRevealPx <= dragLowerBoundPx && velocityPxPerSecond < 0f) ||
+                (dragRawRevealPx >= dragUpperBoundPx && velocityPxPerSecond > 0f)
+            ) {
+                return 0f
+            }
+            return velocityPxPerSecond
+        }
+        if (dragRawRevealPx in dragLowerBoundPx..dragUpperBoundPx) return velocityPxPerSecond
+        val boundary = if (dragRawRevealPx < dragLowerBoundPx) dragLowerBoundPx else dragUpperBoundPx
+        val normalized = tanh((dragRawRevealPx - boundary) / overdrag)
         return velocityPxPerSecond * (1f - normalized * normalized)
     }
 
     private fun outwardExcursion(
         reveal: Float,
-        velocity: Float,
+        velocity: Double,
         target: Float,
-        angularFrequency: Double,
+        spring: SpringDynamics,
     ): Float {
-        val outwardDirection = if (target > 0f) 1f else -1f
-        val displacement = reveal - target
-        var maximumExcursion = max(0f, outwardDirection * displacement)
-        val coefficient = velocity + angularFrequency * displacement
-        if (abs(coefficient) <= Double.MIN_VALUE) return maximumExcursion
-        val extremumTime = velocity / (angularFrequency * coefficient)
-        if (extremumTime <= 0.0 || !extremumTime.isFinite()) return maximumExcursion
-        val extremumDisplacement = (displacement + coefficient * extremumTime) * exp(-angularFrequency * extremumTime)
-        maximumExcursion = max(maximumExcursion, (outwardDirection * extremumDisplacement).toFloat())
-        return maximumExcursion
+        val outwardDirection = if (target > 0f) 1 else -1
+        val displacement = (reveal - target).toDouble()
+        val initialVelocity = velocity
+        var maximumExcursion = max(0.0, outwardDirection * displacement)
+        if (spring.regime == SpringRegime.Underdamped) {
+            val angularFrequency = spring.secondaryFrequency
+            val sineCoefficient =
+                -(spring.decayRate * initialVelocity + spring.frequencySquared * displacement) / angularFrequency
+            val phase = atan2(initialVelocity, sineCoefficient)
+            val rootIndex = floor(phase / Math.PI) + 1.0
+            val firstExtremum = (rootIndex * Math.PI - phase) / angularFrequency
+            maximumExcursion = max(
+                maximumExcursion,
+                excursionAtTime(spring, displacement, initialVelocity, firstExtremum, outwardDirection),
+            )
+            maximumExcursion = max(
+                maximumExcursion,
+                excursionAtTime(
+                    spring,
+                    displacement,
+                    initialVelocity,
+                    firstExtremum + Math.PI / angularFrequency,
+                    outwardDirection,
+                ),
+            )
+        } else if (spring.regime == SpringRegime.Overdamped) {
+            val slowRate = -spring.frequencySquared / (spring.decayRate + spring.secondaryFrequency)
+            val fastRate = -(spring.decayRate + spring.secondaryFrequency)
+            val slowCoefficient = (initialVelocity - fastRate * displacement) / (slowRate - fastRate)
+            val fastCoefficient = displacement - slowCoefficient
+            val denominator = slowRate * slowCoefficient
+            if (denominator != 0.0 && denominator.isFinite()) {
+                val ratio = -(fastRate * fastCoefficient) / denominator
+                if (ratio > 0.0 && ratio.isFinite()) {
+                    maximumExcursion = max(
+                        maximumExcursion,
+                        excursionAtTime(
+                            spring,
+                            displacement,
+                            initialVelocity,
+                            ln(ratio) / (slowRate - fastRate),
+                            outwardDirection,
+                        ),
+                    )
+                }
+            }
+        } else {
+            val coefficient = initialVelocity + spring.decayRate * displacement
+            val denominator = spring.decayRate * coefficient
+            if (denominator != 0.0 && denominator.isFinite()) {
+                maximumExcursion = max(
+                    maximumExcursion,
+                    excursionAtTime(
+                        spring,
+                        displacement,
+                        initialVelocity,
+                        initialVelocity / denominator,
+                        outwardDirection,
+                    ),
+                )
+            }
+        }
+        return max(0.0, maximumExcursion).toFloat()
+    }
+
+    private fun excursionAtTime(
+        spring: SpringDynamics,
+        displacement: Double,
+        velocity: Double,
+        time: Double,
+        outwardDirection: Int,
+    ): Double {
+        if (time <= 0.0 || !time.isFinite()) return 0.0
+        evaluateSpring(spring, displacement, velocity, time, excursionState)
+        return outwardDirection * excursionState.displacement
     }
 
     private fun boundedSettleVelocity(
         reveal: Float,
-        velocity: Float,
+        velocity: Double,
         target: Float,
+        spring: SpringDynamics,
         allowedExcursion: Float,
-    ): Float {
-        val outwardDirection = if (target > 0f) 1f else -1f
+    ): Double {
+        val outwardDirection = if (target > 0f) 1 else -1
         val currentExcursion = max(0f, outwardDirection * (reveal - target))
-        val resolvedAllowedExcursion = max(allowedExcursion, currentExcursion)
-        val baseExcursion = outwardExcursion(reveal, velocity, target, SETTLE_ANGULAR_FREQUENCY)
-        if (baseExcursion <= resolvedAllowedExcursion) return velocity
+        val naturalExcursion = outwardExcursion(reveal, 0.0, target, spring)
+        val resolvedAllowedExcursion = max(allowedExcursion, max(currentExcursion, naturalExcursion))
+        if (velocity == 0.0) return 0.0
+        if (velocity.isFinite() && outwardExcursion(reveal, velocity, target, spring) <= resolvedAllowedExcursion) {
+            return velocity
+        }
 
-        var lowerScale = 0f
-        var upperScale = 1f
-        repeat(32) {
-            val candidateScale = (lowerScale + upperScale) * 0.5f
-            val candidateVelocity = velocity * candidateScale
-            val candidateExcursion = outwardExcursion(reveal, candidateVelocity, target, SETTLE_ANGULAR_FREQUENCY)
-            if (candidateExcursion > resolvedAllowedExcursion) {
-                upperScale = candidateScale
+        val direction = if (velocity < 0.0) -1.0 else 1.0
+        val requestedMagnitude = abs(velocity)
+        val estimate = spring.decayRate * max(resolvedAllowedExcursion.toDouble(), 1.0)
+        var upperMagnitude = if (estimate.isFinite()) max(1.0, min(requestedMagnitude, estimate)) else 1.0
+        var lowerMagnitude = 0.0
+        while (true) {
+            val excursion = outwardExcursion(reveal, direction * upperMagnitude, target, spring)
+            if (!excursion.isFinite() || excursion > resolvedAllowedExcursion) break
+            if (upperMagnitude >= requestedMagnitude) return velocity
+            lowerMagnitude = upperMagnitude
+            upperMagnitude = min(requestedMagnitude, upperMagnitude * 2.0)
+        }
+        repeat(40) {
+            val candidateMagnitude = lowerMagnitude + (upperMagnitude - lowerMagnitude) * 0.5
+            val excursion = outwardExcursion(reveal, direction * candidateMagnitude, target, spring)
+            if (!excursion.isFinite() || excursion > resolvedAllowedExcursion) {
+                upperMagnitude = candidateMagnitude
             } else {
-                lowerScale = candidateScale
+                lowerMagnitude = candidateMagnitude
             }
         }
-        return velocity * lowerScale
+        return direction * lowerMagnitude
     }
 
-    private fun overtravelLimitPx(): Float = OVERTRAVEL_LIMIT_DP * resources.displayMetrics.density
+    private fun evaluateSpring(
+        spring: SpringDynamics,
+        initialDisplacement: Double,
+        initialVelocity: Double,
+        elapsed: Double,
+        result: SpringState,
+    ) {
+        if (elapsed <= 0.0) {
+            result.displacement = initialDisplacement
+            result.velocity = initialVelocity
+            return
+        }
+        if (spring.regime == SpringRegime.Underdamped) {
+            val angularFrequency = spring.secondaryFrequency
+            val sineCoefficient = (initialVelocity + spring.decayRate * initialDisplacement) / angularFrequency
+            val angle = angularFrequency * elapsed
+            val decay = exp(-spring.decayRate * elapsed)
+            val oscillation = initialDisplacement * cos(angle) + sineCoefficient * sin(angle)
+            val oscillationVelocity =
+                -initialDisplacement * angularFrequency * sin(angle) +
+                    sineCoefficient * angularFrequency * cos(angle)
+            result.displacement = decay * oscillation
+            result.velocity = decay * (oscillationVelocity - spring.decayRate * oscillation)
+            return
+        }
+        if (spring.regime == SpringRegime.Overdamped) {
+            val slowRate = -spring.frequencySquared / (spring.decayRate + spring.secondaryFrequency)
+            val fastRate = -(spring.decayRate + spring.secondaryFrequency)
+            val slowCoefficient = (initialVelocity - fastRate * initialDisplacement) / (slowRate - fastRate)
+            val fastCoefficient = initialDisplacement - slowCoefficient
+            val slowDecay = exp(slowRate * elapsed)
+            val fastDecay = exp(fastRate * elapsed)
+            result.displacement = slowCoefficient * slowDecay + fastCoefficient * fastDecay
+            result.velocity = slowRate * slowCoefficient * slowDecay + fastRate * fastCoefficient * fastDecay
+            return
+        }
+        val coefficient = initialVelocity + spring.decayRate * initialDisplacement
+        val decay = exp(-spring.decayRate * elapsed)
+        result.displacement = (initialDisplacement + coefficient * elapsed) * decay
+        result.velocity = (initialVelocity - spring.decayRate * coefficient * elapsed) * decay
+    }
+
+    private fun defaultOverdragPx(): Float = DEFAULT_OVERDRAG_DP * resources.displayMetrics.density
+
+    private fun resolveSpring(mass: Double, stiffness: Double, damping: Double): Spring {
+        val resolvedMass = if (mass.isFinite() && mass > 0.0) mass else DEFAULT_SPRING_MASS
+        val resolvedStiffness = if (stiffness.isFinite() && stiffness > 0.0) stiffness else DEFAULT_SPRING_STIFFNESS
+        val resolvedDamping = if (damping.isFinite() && damping > 0.0) damping else DEFAULT_SPRING_DAMPING
+        val frequencySquared = resolvedStiffness / resolvedMass
+        val decayRate = springDecayRate(resolvedMass, resolvedDamping)
+        val dynamics = if (
+            frequencySquared.isFinite() && frequencySquared > 0.0 && decayRate.isFinite() && decayRate > 0.0
+        ) {
+            createSpringDynamics(resolvedMass, resolvedStiffness, resolvedDamping)
+        } else {
+            DEFAULT_SPRING_DYNAMICS
+        }
+        return Spring(resolvedMass, resolvedStiffness, resolvedDamping, dynamics)
+    }
 
     private fun setHighFrameRateRequested(requested: Boolean) {
         if (highFrameRateRequested == requested) return
@@ -949,6 +1230,13 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
         }
     }
 
+    private fun remapReveal(reveal: Float, oldWidth: Float, newWidth: Float): Float = when {
+        reveal < 0f -> reveal
+        reveal > oldWidth -> newWidth + reveal - oldWidth
+        oldWidth > 0f -> reveal / oldWidth * newWidth
+        else -> reveal
+    }
+
     private fun targetReveal(nextOpen: Boolean): Float = if (nextOpen) laidOutDrawerWidthPx else 0f
 
     private fun phaseName(): String = when (phase) {
@@ -1016,9 +1304,59 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
         const val MOTION_CHANNEL_COUNT = 11
         const val INVALID_POINTER_ID = -1
         const val NANOS_PER_SECOND = 1_000_000_000.0
-        const val SETTLE_ANGULAR_FREQUENCY = 21.991148575128552
         const val SETTLE_POSITION_EPSILON_PX = 0.5
         const val SETTLE_VELOCITY_EPSILON_PX_PER_SECOND = 5.0
-        const val OVERTRAVEL_LIMIT_DP = 4f
+        const val DEFAULT_OVERDRAG_DP = 4f
+        const val DEFAULT_RELEASE_OPEN_THRESHOLD = 0.5
+        const val DEFAULT_RELEASE_VELOCITY_SENSITIVITY = 1.0
+        const val DEFAULT_RELEASE_VELOCITY_TRANSFER = 1.0
+        const val DEFAULT_SPRING_MASS = 1.0
+        val DEFAULT_SPRING_STIFFNESS = 49.0 * Math.PI * Math.PI
+        val DEFAULT_SPRING_DAMPING = 14.0 * Math.PI
+        val DEFAULT_SPRING_DYNAMICS =
+            createSpringDynamics(DEFAULT_SPRING_MASS, DEFAULT_SPRING_STIFFNESS, DEFAULT_SPRING_DAMPING)
+        val DEFAULT_SPRING = Spring(
+            DEFAULT_SPRING_MASS,
+            DEFAULT_SPRING_STIFFNESS,
+            DEFAULT_SPRING_DAMPING,
+            DEFAULT_SPRING_DYNAMICS,
+        )
+
+        fun createSpringDynamics(mass: Double, stiffness: Double, damping: Double): SpringDynamics {
+            val frequencySquared = stiffness / mass
+            val decayRate = springDecayRate(mass, damping)
+            val naturalFrequency = sqrt(frequencySquared)
+            val tolerance = 32.0 * Math.ulp(1.0) * max(decayRate, naturalFrequency)
+            return when {
+                abs(decayRate - naturalFrequency) <= tolerance -> SpringDynamics(
+                    frequencySquared,
+                    decayRate,
+                    0.0,
+                    SpringRegime.Critical,
+                )
+                decayRate < naturalFrequency -> {
+                    val ratio = decayRate / naturalFrequency
+                    SpringDynamics(
+                        frequencySquared,
+                        decayRate,
+                        naturalFrequency * sqrt(max(0.0, 1.0 - ratio * ratio)),
+                        SpringRegime.Underdamped,
+                    )
+                }
+                else -> {
+                    val ratio = naturalFrequency / decayRate
+                    SpringDynamics(
+                        frequencySquared,
+                        decayRate,
+                        decayRate * sqrt(max(0.0, 1.0 - ratio * ratio)),
+                        SpringRegime.Overdamped,
+                    )
+                }
+            }
+        }
+
+        fun springDecayRate(mass: Double, damping: Double): Double {
+            return if (mass > 1.0) damping / mass / 2.0 else damping / 2.0 / mass
+        }
     }
 }

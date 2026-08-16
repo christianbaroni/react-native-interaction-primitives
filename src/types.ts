@@ -77,6 +77,25 @@ export type SideDrawerInterpolation = Readonly<{
   outputRange: readonly number[];
 }>;
 
+export type SideDrawerInteraction = Readonly<{
+  /** Physical spring used by released gestures and animated commands. */
+  spring?: Readonly<{
+    mass?: number;
+    stiffness?: number;
+    damping?: number;
+  }>;
+  release?: Readonly<{
+    /** Projected reveal progress at which a released gesture opens. */
+    openThreshold?: number;
+    /** Relative influence of release velocity on endpoint selection. */
+    velocitySensitivity?: number;
+    /** Scale applied to release velocity before the settling spring begins. */
+    velocityTransfer?: number;
+  }>;
+  /** Endpoint travel admitted from direct manipulation and release energy, in points or density-independent pixels. */
+  overdrag?: number;
+}>;
+
 export type SideDrawerMotion = Readonly<{
   content?: Readonly<{
     border?: Readonly<{
@@ -124,6 +143,7 @@ export type SideDrawerProps = ViewProps & {
   gestureEnabled?: boolean;
   gestureReleaseHaptic?: HapticFeedbackType;
   initialOpen?: boolean;
+  interaction?: SideDrawerInteraction;
   motion?: SideDrawerMotion;
   onOpenChange?: (open: boolean) => void;
   onProgress?: (event: SideDrawerProgressNativeEvent) => void;

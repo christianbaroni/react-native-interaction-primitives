@@ -291,16 +291,37 @@ static NSString *RNSideDrawerHapticValue(RNSideDrawerViewGestureReleaseHaptic va
   if (oldViewProps.openChangeEventsEnabled != newViewProps.openChangeEventsEnabled) {
     _drawerView.openChangeEventsEnabled = newViewProps.openChangeEventsEnabled;
   }
+  if (oldViewProps.overdrag != newViewProps.overdrag) {
+    _drawerView.overdrag = newViewProps.overdrag;
+  }
   if (oldViewProps.overlayColor != newViewProps.overlayColor) {
     _drawerView.overlayColor = RCTUIColorFromSharedColor(newViewProps.overlayColor);
   }
   if (oldViewProps.progressEventsEnabled != newViewProps.progressEventsEnabled) {
     _drawerView.progressEventsEnabled = newViewProps.progressEventsEnabled;
   }
+  if (oldViewProps.releaseOpenThreshold != newViewProps.releaseOpenThreshold) {
+    _drawerView.releaseOpenThreshold = newViewProps.releaseOpenThreshold;
+  }
+  if (oldViewProps.releaseVelocitySensitivity != newViewProps.releaseVelocitySensitivity) {
+    _drawerView.releaseVelocitySensitivity = newViewProps.releaseVelocitySensitivity;
+  }
+  if (oldViewProps.releaseVelocityTransfer != newViewProps.releaseVelocityTransfer) {
+    _drawerView.releaseVelocityTransfer = newViewProps.releaseVelocityTransfer;
+  }
   if (oldViewProps.side != newViewProps.side) {
     _drawerView.side = newViewProps.side == RNSideDrawerViewSide::End
         ? RNSideDrawerSideEnd
         : RNSideDrawerSideStart;
+  }
+  if (oldViewProps.springDamping != newViewProps.springDamping) {
+    _drawerView.springDamping = newViewProps.springDamping;
+  }
+  if (oldViewProps.springMass != newViewProps.springMass) {
+    _drawerView.springMass = newViewProps.springMass;
+  }
+  if (oldViewProps.springStiffness != newViewProps.springStiffness) {
+    _drawerView.springStiffness = newViewProps.springStiffness;
   }
   [super updateProps:props oldProps:oldProps];
 }
@@ -412,8 +433,15 @@ RCT_EXPORT_VIEW_PROPERTY(gestureReleaseHaptic, NSString)
 RCT_EXPORT_VIEW_PROPERTY(initialOpen, BOOL)
 RCT_EXPORT_VIEW_PROPERTY(motionConfig, NSArray)
 RCT_EXPORT_VIEW_PROPERTY(openChangeEventsEnabled, BOOL)
+RCT_EXPORT_VIEW_PROPERTY(overdrag, CGFloat)
 RCT_EXPORT_VIEW_PROPERTY(overlayColor, UIColor)
 RCT_EXPORT_VIEW_PROPERTY(progressEventsEnabled, BOOL)
+RCT_EXPORT_VIEW_PROPERTY(releaseOpenThreshold, CGFloat)
+RCT_EXPORT_VIEW_PROPERTY(releaseVelocitySensitivity, CGFloat)
+RCT_EXPORT_VIEW_PROPERTY(releaseVelocityTransfer, CGFloat)
+RCT_EXPORT_VIEW_PROPERTY(springDamping, CGFloat)
+RCT_EXPORT_VIEW_PROPERTY(springMass, CGFloat)
+RCT_EXPORT_VIEW_PROPERTY(springStiffness, CGFloat)
 RCT_EXPORT_VIEW_PROPERTY(onOpenChange, RCTDirectEventBlock)
 RCT_EXPORT_VIEW_PROPERTY(onProgress, RCTDirectEventBlock)
 

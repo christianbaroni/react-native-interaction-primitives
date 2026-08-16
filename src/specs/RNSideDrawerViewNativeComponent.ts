@@ -1,6 +1,6 @@
 import type * as React from 'react';
 import { codegenNativeCommands, codegenNativeComponent, type ColorValue, type HostComponent, type ViewProps } from 'react-native';
-import type { DirectEventHandler, Float, WithDefault } from 'react-native/Libraries/Types/CodegenTypes';
+import type { DirectEventHandler, Double, Float, WithDefault } from 'react-native/Libraries/Types/CodegenTypes';
 
 export type NativeSideDrawerOpenChange = Readonly<{
   open: boolean;
@@ -30,12 +30,19 @@ export interface NativeProps extends ViewProps {
   >;
   initialOpen?: WithDefault<boolean, false>;
   motionConfig?: ReadonlyArray<Float>;
+  overdrag?: WithDefault<Double, 4>;
   onOpenChange?: DirectEventHandler<NativeSideDrawerOpenChange>;
   onProgress?: DirectEventHandler<NativeSideDrawerProgress>;
   openChangeEventsEnabled?: WithDefault<boolean, false>;
   overlayColor?: ColorValue;
   progressEventsEnabled?: WithDefault<boolean, false>;
+  releaseOpenThreshold?: WithDefault<Double, 0.5>;
+  releaseVelocitySensitivity?: WithDefault<Double, 1>;
+  releaseVelocityTransfer?: WithDefault<Double, 1>;
   side?: WithDefault<'start' | 'end', 'start'>;
+  springDamping?: WithDefault<Double, 43.982297150257104>;
+  springMass?: WithDefault<Double, 1>;
+  springStiffness?: WithDefault<Double, 483.61061565337855>;
 }
 
 interface NativeCommands {

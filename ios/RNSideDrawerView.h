@@ -22,9 +22,16 @@ typedef NS_ENUM(NSInteger, RNSideDrawerSide) {
 @property (nonatomic, assign) BOOL initialOpen;
 @property (nonatomic, copy) NSArray<NSNumber *> *motionConfig;
 @property (nonatomic, assign) BOOL openChangeEventsEnabled;
+@property (nonatomic, assign) CGFloat overdrag;
 @property (nonatomic, strong) UIColor *overlayColor;
 @property (nonatomic, assign) BOOL progressEventsEnabled;
+@property (nonatomic, assign) CGFloat releaseOpenThreshold;
+@property (nonatomic, assign) CGFloat releaseVelocitySensitivity;
+@property (nonatomic, assign) CGFloat releaseVelocityTransfer;
 @property (nonatomic, assign) RNSideDrawerSide side;
+@property (nonatomic, assign) CGFloat springDamping;
+@property (nonatomic, assign) CGFloat springMass;
+@property (nonatomic, assign) CGFloat springStiffness;
 @property (nonatomic, copy, nullable) void (^openChangeHandler)(NSDictionary *payload);
 @property (nonatomic, copy, nullable) void (^progressHandler)(NSDictionary *payload);
 @property (nonatomic, copy, nullable) RCTDirectEventBlock onOpenChange;

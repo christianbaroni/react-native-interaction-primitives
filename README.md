@@ -136,6 +136,7 @@ The ref exposes `open`, `close`, and `toggle`; each accepts `{ animated?: boolea
 - `gestureEnabled?: boolean` — enables native drag gestures; commands and tap-to-close remain available.
 - `gestureReleaseHaptic?: HapticFeedbackType` — triggers once when a released swipe commits a change from the gesture's open/closed origin. A swipe that returns to its origin, commands, taps, cancellation, initial state, and animation completion never trigger it.
 - `initialOpen?: boolean` — selects the initial native endpoint without creating a controlled state loop.
+- `interaction?: SideDrawerInteraction` — tunes the native spring, release intent, and endpoint resistance without moving frame ownership into JavaScript.
 - `motion?: SideDrawerMotion` — declarative native interpolation for drawer/content opacity, uniform scale, `translateX`, `translateY`, pane border/shadow, and overlay color/opacity.
 - `side?: 'start' | 'end'` — logical drawer side, resolved through native layout direction.
 - `onOpenChange?: (open) => void` — reports a completed endpoint change.
@@ -144,6 +145,43 @@ The ref exposes `open`, `close`, and `toggle`; each accepts `{ animated?: boolea
 The default iOS screen radius reads the private `UIScreen` display-corner property and falls back to `0` if it is unavailable. Pass an explicit `contentCornerRadius` to avoid that private lookup when App Store policy is a concern. A component-owned native content host owns the mask, so React lifecycle updates cannot replace it. Android uses `WindowInsets.getRoundedCorner` on Android 12 and later and otherwise falls back to `0` unless an override is supplied.
 
 `onProgress` reports `progress` in `[0, 1]`, `phase`, `targetOpen`, and the `release`, `programmatic`, or `none` settling source. Attaching an observer publishes the current native snapshot, including an `initialOpen` state that has not moved. It is observational; writing the event back into layout is not part of the component contract.
+
+### Interaction
+
+`interaction.spring` exposes the physical mass, stiffness, and damping coefficient used by released gestures and animated commands. Values must be finite and greater than zero. The default is the existing critically damped response:
+
+```tsx
+interaction={{
+  spring: {
+    mass: 1,
+    stiffness: 483.61061565337855,
+    damping: 43.982297150257104,
+  },
+}}
+```
+
+These are direct spring parameters, not duration or bounce aliases. Lower damping can create underdamped oscillation; critical and overdamped combinations are also supported. Zero damping is excluded because it never completes, while the drawer's settling phase must reach an endpoint.
+
+Release intent and release motion are separate decisions:
+
+```tsx
+interaction={{
+  release: {
+    openThreshold: 0.5,
+    velocitySensitivity: 1,
+    velocityTransfer: 1,
+  },
+  overdrag: 4,
+}}
+```
+
+`openThreshold` is the projected reveal progress that selects open and must be in `[0, 1]`. `velocitySensitivity` changes only endpoint selection: `0` ignores velocity, `1` preserves the accepted platform-native prediction, and larger values make decisive flings more influential. It is not an animation duration and does not need to track the spring.
+
+`velocityTransfer` changes only how much mapped finger velocity the settling spring receives. `0` starts from rest, `1` requests a continuous release handoff, and values above `1` amplify release energy. The endpoint boundary can resist that energy when it would add more exterior travel than `overdrag` permits.
+
+`overdrag` is measured in points on iOS and density-independent pixels on Android. It controls gesture-derived endpoint travel and defaults to `4`; `0` creates a hard, immediately reversible direct boundary. An underdamped spring's own natural overshoot is not clipped or rewritten by this setting.
+
+Each admitted gesture snapshots the complete interaction configuration, including its release policy. Programmatic settling takes a fresh snapshot when it begins. Updating `interaction` never changes a gesture or settle already in progress; layout, pause, and resume retain that interaction's snapshot. Gesture input, target choice, settling, interruption, and retargeting remain native on Paper and Fabric.
 
 Each motion channel has matching `inputRange` and `outputRange` arrays with at least two points. Inputs must be finite, strictly increasing, and within `[0, 1]`; outputs must be finite. Native evaluation clamps before the first input and after the last. Translation outputs use React Native layout units: points on iOS and density-independent pixels on Android.
 
@@ -226,7 +264,7 @@ The controller exposes `progress`, `phase`, `settlingSource`, and `targetOpen` s
 
 ## Motion ownership
 
-On iOS, `UIScrollView` owns full-surface touch arbitration, but its content offset and bounce physics do not own settling. A `UIViewPropertyAnimator` spring moves the native content host directly. On Android, the native parent owns directional interception and `Choreographer` advances the same fixed critical response. Both platforms choose the endpoint with their native velocity projection and admit release velocity continuously until the resulting critical trajectory would exceed the four-point/dp excursion bound. An outward gesture cannot begin from the closed endpoint; after a valid gesture has moved inward, reversal into either endpoint uses the same bounded resistance.
+On iOS, `UIScrollView` owns full-surface touch arbitration, but its content offset and bounce physics do not own settling. A `UIViewPropertyAnimator` spring moves the native content host directly. On Android, the native parent owns directional interception and `Choreographer` advances the same damped-spring equation. Both platforms choose the endpoint with native velocity projection and apply the configured release and boundary policy before starting the spring. An outward gesture cannot begin from the closed endpoint; after a valid gesture has moved inward, reversal into either endpoint uses the same bounded resistance.
 
 Core Animation owns iOS pane presentation and receives system-managed ProMotion pacing. A `CADisplayLink` exists only while configured secondary motion, progress observation, or touch-pause resumption requires it; it samples the presented pane once and never advances primary motion. Android advances from `Choreographer.FrameCallback.frameTimeNanos` and requests the high frame-rate category on Android 15 and later. Neither implementation waits on JavaScript or Reanimated to produce a frame.
 
