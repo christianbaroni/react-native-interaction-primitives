@@ -5,6 +5,8 @@
 #import "RNSideDrawerSlots.h"
 #import "RNPagerDrawerHapticFeedback.h"
 
+#import <React/RCTTouchHandler.h>
+#import <React/RCTSurfaceTouchHandler.h>
 #import <React/UIView+React.h>
 #import <QuartzCore/QuartzCore.h>
 #include <algorithm>
@@ -73,8 +75,21 @@ struct RNSideDrawerInterpolation {
 
 using RNSideDrawerMotion = std::array<RNSideDrawerInterpolation, RNSideDrawerMotionChannelCount>;
 
+static UIGestureRecognizer *RNSideDrawerFindReactTouchHandler(UIView *view)
+{
+  for (UIView *ancestor = view; ancestor != nil; ancestor = ancestor.superview) {
+    for (UIGestureRecognizer *gestureRecognizer in ancestor.gestureRecognizers) {
+      if ([gestureRecognizer isKindOfClass:RCTTouchHandler.class] ||
+          [gestureRecognizer isKindOfClass:RCTSurfaceTouchHandler.class]) {
+        return gestureRecognizer;
+      }
+    }
+  }
+  return nil;
+}
+
 @interface RNSideDrawerScrollView : UIScrollView
-@property (nonatomic, copy, nullable) dispatch_block_t didBeginContact;
+@property (nonatomic, copy, nullable) void (^didBeginContact)(UIView *view);
 @property (nonatomic, copy, nullable) BOOL (^shouldBeginPan)(CGPoint velocity);
 @end
 
@@ -82,8 +97,14 @@ using RNSideDrawerMotion = std::array<RNSideDrawerInterpolation, RNSideDrawerMot
 
 - (BOOL)touchesShouldBegin:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event inContentView:(UIView *)view
 {
-  if (self.didBeginContact != nil) self.didBeginContact();
+  if (self.didBeginContact != nil) self.didBeginContact(view);
   return [super touchesShouldBegin:touches withEvent:event inContentView:view];
+}
+
+- (BOOL)touchesShouldCancelInContentView:(UIView *)view
+{
+  (void)view;
+  return YES;
 }
 
 - (BOOL)gestureRecognizerShouldBegin:(UIGestureRecognizer *)gestureRecognizer
@@ -135,7 +156,7 @@ using RNSideDrawerMotion = std::array<RNSideDrawerInterpolation, RNSideDrawerMot
 - (CGFloat)directRevealForRawReveal:(CGFloat)reveal;
 - (void)finishAtOpen:(BOOL)open;
 - (void)handlePanGesture:(UIPanGestureRecognizer *)panGestureRecognizer;
-- (void)handleContactBegin;
+- (void)handleContactBeginInView:(UIView *)view;
 - (void)pauseActiveSettle;
 - (BOOL)prepareSettleToOpen:(BOOL)open
                     reveal:(CGFloat)reveal
@@ -163,6 +184,7 @@ using RNSideDrawerMotion = std::array<RNSideDrawerInterpolation, RNSideDrawerMot
 
 @implementation RNSideDrawerView {
   RNSideDrawerScrollView *_scrollView;
+  __weak UIGestureRecognizer *_reactTouchHandler;
   UIView *_contactBackingView;
   RNSideDrawerContentPresentationView *_contentPresentationView;
   UIView *_contentHostView;
@@ -382,8 +404,8 @@ static RNSideDrawerMotion RNSideDrawerCompileMotion(NSArray<NSNumber *> *config)
     [_scrollView.panGestureRecognizer addTarget:self action:@selector(handlePanGesture:)];
 
     __weak RNSideDrawerView *weakSelf = self;
-    _scrollView.didBeginContact = ^{
-      [weakSelf handleContactBegin];
+    _scrollView.didBeginContact = ^(UIView *view) {
+      [weakSelf handleContactBeginInView:view];
     };
     _scrollView.shouldBeginPan = ^BOOL(CGPoint velocity) {
       RNSideDrawerView *strongSelf = weakSelf;
@@ -858,8 +880,9 @@ static RNSideDrawerMotion RNSideDrawerCompileMotion(NSArray<NSNumber *> *config)
   [self startSettleDisplayLink];
 }
 
-- (void)handleContactBegin
+- (void)handleContactBeginInView:(UIView *)view
 {
+  _reactTouchHandler = RNSideDrawerFindReactTouchHandler(view);
   [_hapticFeedback prepare];
   [self pauseActiveSettle];
 }
@@ -913,6 +936,16 @@ static RNSideDrawerMotion RNSideDrawerCompileMotion(NSArray<NSNumber *> *config)
 - (void)scrollViewWillBeginDragging:(UIScrollView *)scrollView
 {
   (void)scrollView;
+  UIGestureRecognizer *reactTouchHandler = _reactTouchHandler;
+  _reactTouchHandler = nil;
+  if (reactTouchHandler.enabled) {
+    if ([reactTouchHandler isKindOfClass:RCTTouchHandler.class]) {
+      [(RCTTouchHandler *)reactTouchHandler cancel];
+    } else {
+      reactTouchHandler.enabled = NO;
+      reactTouchHandler.enabled = YES;
+    }
+  }
   _suppressCurrentDragRelease = NO;
   BOOL interruptedTargetOpen = _phase == RNSideDrawerPhaseSettling ? _targetOpen : _open;
   _gestureOriginOpen = interruptedTargetOpen;
