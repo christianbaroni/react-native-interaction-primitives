@@ -79,6 +79,11 @@ export type SideDrawerInterpolation = Readonly<{
 
 export type SideDrawerMotion = Readonly<{
   content?: Readonly<{
+    border?: Readonly<{
+      color: ColorValue;
+      opacity?: SideDrawerInterpolation;
+      width?: number;
+    }>;
     opacity?: SideDrawerInterpolation;
     scale?: SideDrawerInterpolation;
     translateX?: SideDrawerInterpolation;

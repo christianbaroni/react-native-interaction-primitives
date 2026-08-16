@@ -89,6 +89,8 @@ class SideDrawerImplementation extends React.PureComponent<SideDrawerProps> impl
 
     requirePositiveFinite(drawerWidth, 'drawerWidth');
     if (contentCornerRadius != null) requireNonNegativeFinite(contentCornerRadius, 'contentCornerRadius');
+    const contentBorder = motion?.content?.border;
+    if (contentBorder?.width != null) requireNonNegativeFinite(contentBorder.width, 'motion.content.border.width');
     const motionConfig = this.motionConfigFor(motion);
 
     // Reanimated Paper subscriptions use RN's normalized top* event name.
@@ -97,6 +99,8 @@ class SideDrawerImplementation extends React.PureComponent<SideDrawerProps> impl
     return (
       <NativeSideDrawerView
         {...props}
+        contentBorderColor={contentBorder?.color ?? 'transparent'}
+        contentBorderWidth={contentBorder == null ? 0 : (contentBorder.width ?? 1)}
         contentCornerRadius={contentCornerRadius ?? -1}
         drawerWidth={drawerWidth}
         gestureEnabled={gestureEnabled}

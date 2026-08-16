@@ -8,7 +8,7 @@ describe('SideDrawer motion compilation', () => {
         drawer: { opacity: { inputRange: [0, 0.9], outputRange: [0.1, 1] } },
         overlay: { opacity: { inputRange: [0, 1], outputRange: [0, 0.42] } },
       })
-    ).toEqual([2, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0.1, 0.9, 1, 0, 0, 1, 0.42]);
+    ).toEqual([2, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0.1, 0.9, 1, 0, 0, 1, 0.42]);
   });
 
   it('rejects interpolation configs that cannot be evaluated deterministically', () => {

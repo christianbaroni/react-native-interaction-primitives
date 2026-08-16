@@ -58,6 +58,16 @@ internal class RNSideDrawerViewManager :
         view.drawerWidthPx = PixelUtil.toPixelFromDIP(value)
     }
 
+    @ReactProp(name = "contentBorderColor", customType = "Color")
+    override fun setContentBorderColor(view: RNSideDrawerView, value: Int?) {
+        view.contentBorderColor = value ?: 0
+    }
+
+    @ReactProp(name = "contentBorderWidth", defaultFloat = 0f)
+    override fun setContentBorderWidth(view: RNSideDrawerView, value: Float) {
+        view.contentBorderWidthPx = PixelUtil.toPixelFromDIP(value)
+    }
+
     @ReactProp(name = "contentCornerRadius", defaultFloat = -1f)
     override fun setContentCornerRadius(view: RNSideDrawerView, value: Float) {
         view.contentCornerRadiusPx = if (value < 0f) value else PixelUtil.toPixelFromDIP(value)

@@ -244,6 +244,12 @@ static NSString *RNSideDrawerHapticValue(RNSideDrawerViewGestureReleaseHaptic va
 {
   const auto &oldViewProps = static_cast<const RNSideDrawerViewProps &>(*_props);
   const auto &newViewProps = static_cast<const RNSideDrawerViewProps &>(*props);
+  if (oldViewProps.contentBorderColor != newViewProps.contentBorderColor) {
+    _drawerView.contentBorderColor = RCTUIColorFromSharedColor(newViewProps.contentBorderColor);
+  }
+  if (oldViewProps.contentBorderWidth != newViewProps.contentBorderWidth) {
+    _drawerView.contentBorderWidth = newViewProps.contentBorderWidth;
+  }
   if (oldViewProps.contentCornerRadius != newViewProps.contentCornerRadius) {
     _drawerView.contentCornerRadius = newViewProps.contentCornerRadius;
   }
@@ -376,6 +382,8 @@ RCT_EXPORT_MODULE(RNSideDrawerView)
 }
 
 RCT_EXPORT_VIEW_PROPERTY(drawerWidth, CGFloat)
+RCT_EXPORT_VIEW_PROPERTY(contentBorderColor, UIColor)
+RCT_EXPORT_VIEW_PROPERTY(contentBorderWidth, CGFloat)
 RCT_EXPORT_VIEW_PROPERTY(contentCornerRadius, CGFloat)
 RCT_EXPORT_VIEW_PROPERTY(gestureEnabled, BOOL)
 RCT_EXPORT_VIEW_PROPERTY(gestureReleaseHaptic, NSString)

@@ -120,6 +120,21 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
             requestLayout()
         }
 
+    var contentBorderColor: Int = Color.TRANSPARENT
+        set(value) {
+            if (field == value) return
+            field = value
+            contentView?.setDrawerBorderColor(value)
+        }
+
+    var contentBorderWidthPx: Float = 0f
+        set(value) {
+            val next = if (value.isFinite()) max(0f, value) else 0f
+            if (field == next) return
+            field = next
+            contentView?.setDrawerBorderWidth(next)
+        }
+
     var contentCornerRadiusPx: Float = -1f
         set(value) {
             if (field == value) return
@@ -360,6 +375,8 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
             is RNSideDrawerPanelView -> panelView = child
             is RNSideDrawerContentView -> {
                 contentView = child
+                child.setDrawerBorderColor(contentBorderColor)
+                child.setDrawerBorderWidth(contentBorderWidthPx)
                 child.contentCornerRadiusPx = contentCornerRadiusPx
                 child.setDrawerOverlayColor(overlayColor)
                 child.onScrimPress = { close(true) }
@@ -820,6 +837,7 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
             if (content.translationX != contentTranslationX) content.translationX = contentTranslationX
             if (content.translationY != contentTranslationY) content.translationY = contentTranslationY
             content.setDrawerOverlayOpacity(motionValue(OVERLAY_OPACITY, currentProgress, 0f))
+            content.setDrawerBorderOpacity(motionValue(CONTENT_BORDER_OPACITY, currentProgress, 1f))
             content.setDrawerProgress(currentProgress)
         }
         val panelEnabled = currentProgress > 0.001f
@@ -912,7 +930,8 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
         const val CONTENT_TRANSLATE_X = 6
         const val CONTENT_TRANSLATE_Y = 7
         const val OVERLAY_OPACITY = 8
-        const val MOTION_CHANNEL_COUNT = 9
+        const val CONTENT_BORDER_OPACITY = 9
+        const val MOTION_CHANNEL_COUNT = 10
         const val INVALID_POINTER_ID = -1
         const val NANOS_PER_SECOND = 1_000_000_000.0
         const val SETTLE_ANGULAR_FREQUENCY = 21.991148575128552

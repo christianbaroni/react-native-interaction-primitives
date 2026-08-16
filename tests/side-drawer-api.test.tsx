@@ -70,6 +70,13 @@ describe('SideDrawer API', () => {
     expect(() => render(drawer(undefined, { contentCornerRadius: -1 }))).toThrow(
       'contentCornerRadius must be a finite number greater than or equal to zero.'
     );
+    expect(() =>
+      render(
+        drawer(undefined, {
+          motion: { content: { border: { color: 'black', width: -1 } } },
+        })
+      )
+    ).toThrow('motion.content.border.width must be a finite number greater than or equal to zero.');
   });
 
   it('defaults content clipping to the native screen radius', () => {
@@ -78,6 +85,20 @@ describe('SideDrawer API', () => {
 
     rerender(drawer(undefined, { contentCornerRadius: 0 }));
     expect(lastNativeProps('RNSideDrawerView').contentCornerRadius).toBe(0);
+  });
+
+  it('omits the border by default and uses one layout unit when present', () => {
+    const { rerender } = render(drawer());
+    expect(lastNativeProps('RNSideDrawerView')).toMatchObject({
+      contentBorderColor: 'transparent',
+      contentBorderWidth: 0,
+    });
+
+    rerender(drawer(undefined, { motion: { content: { border: { color: 'white' } } } }));
+    expect(lastNativeProps('RNSideDrawerView')).toMatchObject({
+      contentBorderColor: 'white',
+      contentBorderWidth: 1,
+    });
   });
 
   it('enables release haptics only when a feedback type is present', () => {
@@ -90,6 +111,13 @@ describe('SideDrawer API', () => {
 
   it('compiles declarative motion into one native configuration', () => {
     const motion = {
+      content: {
+        border: {
+          color: '#AABBCC',
+          opacity: { inputRange: [0, 0.8, 1], outputRange: [0, 0.6, 1] },
+          width: 2,
+        },
+      },
       drawer: {
         opacity: { inputRange: [0, 0.9], outputRange: [0.1, 1] },
         scale: { inputRange: [0, 1], outputRange: [0.94, 1] },
@@ -103,7 +131,9 @@ describe('SideDrawer API', () => {
     const firstMotionConfig = lastNativeProps('RNSideDrawerView').motionConfig;
 
     expect(lastNativeProps('RNSideDrawerView')).toMatchObject({
-      motionConfig: [2, 2, 0, 0, 0, 0, 0, 0, 2, 0, 0.1, 0.9, 1, 0, 0.94, 1, 1, 0, 0, 1, 0.4],
+      contentBorderColor: '#AABBCC',
+      contentBorderWidth: 2,
+      motionConfig: [2, 2, 0, 0, 0, 0, 0, 0, 2, 3, 0, 0.1, 0.9, 1, 0, 0.94, 1, 1, 0, 0, 1, 0.4, 0, 0, 0.8, 0.6, 1, 1],
       overlayColor: '#112233',
     });
 

@@ -9,6 +9,8 @@ typedef NS_ENUM(NSInteger, RNSideDrawerSide) {
 };
 
 @interface RNSideDrawerView : UIView
+@property (nonatomic, strong) UIColor *contentBorderColor;
+@property (nonatomic, assign) CGFloat contentBorderWidth;
 @property (nonatomic, assign) CGFloat contentCornerRadius;
 @property (nonatomic, assign) CGFloat drawerWidth;
 @property (nonatomic, assign) BOOL gestureEnabled;

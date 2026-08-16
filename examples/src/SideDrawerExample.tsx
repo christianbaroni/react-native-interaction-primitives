@@ -4,7 +4,15 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SideDrawer, type SideDrawerMotion, type SideDrawerRef } from 'react-native-pager-drawer';
 
 const MENU_ITEMS = ['Library', 'Projects', 'Scheduled', 'Remote', 'Settings'] as const;
+
 const DRAWER_MOTION: SideDrawerMotion = {
+  content: {
+    border: {
+      color: '#FFFFFF',
+      opacity: { inputRange: [0, 0.9], outputRange: [0, 0.24] },
+      width: 1,
+    },
+  },
   drawer: {
     opacity: { inputRange: [0, 0.9], outputRange: [0.1, 1] },
     scale: { inputRange: [0, 0.9], outputRange: [0.94, 1] },

@@ -14,6 +14,8 @@ export type NativeSideDrawerProgress = Readonly<{
 }>;
 
 export interface NativeProps extends ViewProps {
+  contentBorderColor?: ColorValue;
+  contentBorderWidth?: WithDefault<Float, 0>;
   contentCornerRadius?: WithDefault<Float, -1>;
   drawerWidth: Float;
   gestureEnabled?: WithDefault<boolean, true>;

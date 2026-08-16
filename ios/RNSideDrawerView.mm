@@ -35,6 +35,7 @@ typedef NS_ENUM(NSUInteger, RNSideDrawerMotionChannel) {
   RNSideDrawerMotionContentTranslateX,
   RNSideDrawerMotionContentTranslateY,
   RNSideDrawerMotionOverlayOpacity,
+  RNSideDrawerMotionContentBorderOpacity,
   RNSideDrawerMotionChannelCount,
 };
 
@@ -89,6 +90,19 @@ using RNSideDrawerMotion = std::array<RNSideDrawerInterpolation, RNSideDrawerMot
 
 @end
 
+@interface RNSideDrawerBorderLayer : CALayer
+@end
+
+@implementation RNSideDrawerBorderLayer
+
+- (nullable id<CAAction>)actionForKey:(NSString *)event
+{
+  (void)event;
+  return nil;
+}
+
+@end
+
 @interface RNSideDrawerView () <UIScrollViewDelegate>
 - (void)applyContentReveal:(CGFloat)reveal;
 - (void)applyMotionProgress:(CGFloat)progress;
@@ -121,6 +135,7 @@ using RNSideDrawerMotion = std::array<RNSideDrawerInterpolation, RNSideDrawerMot
 - (CGFloat)stopSettleAtCurrentPosition;
 - (void)stopSettleDisplayLink;
 - (void)updateSettleDisplayLink;
+- (void)updateContentBorderColor;
 - (void)updateCountertrackedFramesForOffset:(CGFloat)offset;
 @end
 
@@ -128,6 +143,7 @@ using RNSideDrawerMotion = std::array<RNSideDrawerInterpolation, RNSideDrawerMot
   RNSideDrawerScrollView *_scrollView;
   UIView *_contactBackingView;
   UIView *_contentHostView;
+  RNSideDrawerBorderLayer *_contentBorderLayer;
   NSMutableArray<UIView *> *_slots;
   UIView<RNSideDrawerPanelSlot> *_panelView;
   UIView<RNSideDrawerContentSlot> *_contentView;
@@ -282,6 +298,8 @@ static RNSideDrawerMotion RNSideDrawerCompileMotion(NSArray<NSNumber *> *config)
   if ((self = [super initWithFrame:frame])) {
     self.clipsToBounds = YES;
     _contentCornerRadius = -1;
+    _contentBorderColor = UIColor.clearColor;
+    _contentBorderWidth = 0;
     _motionConfig = @[];
     _overlayColor = UIColor.clearColor;
     _drawerWidth = 0;
@@ -326,6 +344,11 @@ static RNSideDrawerMotion RNSideDrawerCompileMotion(NSArray<NSNumber *> *config)
     _contentHostView.clipsToBounds = YES;
     _contentHostView.isAccessibilityElement = NO;
     [_scrollView addSubview:_contentHostView];
+
+    _contentBorderLayer = [RNSideDrawerBorderLayer layer];
+    _contentBorderLayer.borderWidth = _contentBorderWidth;
+    [_contentHostView.layer addSublayer:_contentBorderLayer];
+    [self updateContentBorderColor];
   }
   return self;
 }
@@ -356,6 +379,7 @@ static RNSideDrawerMotion RNSideDrawerCompileMotion(NSArray<NSNumber *> *config)
   _contactBackingView.bounds = CGRectMake(0, 0, width, height);
   _panelView.bounds = CGRectMake(0, 0, width, height);
   _contentHostView.bounds = CGRectMake(0, 0, width, height);
+  _contentBorderLayer.frame = _contentHostView.bounds;
   _contentView.frame = _contentHostView.bounds;
   if (firstLayout) {
     _reveal = _initialOpen ? _laidOutDrawerWidth : 0;
@@ -400,6 +424,28 @@ static RNSideDrawerMotion RNSideDrawerCompileMotion(NSArray<NSNumber *> *config)
 {
   [super didMoveToWindow];
   [self applyContentCorners];
+  [self updateContentBorderColor];
+}
+
+- (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection
+{
+  [super traitCollectionDidChange:previousTraitCollection];
+  if (previousTraitCollection == nil ||
+      [self.traitCollection hasDifferentColorAppearanceComparedToTraitCollection:previousTraitCollection]) {
+    [self updateContentBorderColor];
+  }
+}
+
+- (void)setContentBorderColor:(UIColor *)contentBorderColor
+{
+  _contentBorderColor = contentBorderColor ?: UIColor.clearColor;
+  [self updateContentBorderColor];
+}
+
+- (void)setContentBorderWidth:(CGFloat)contentBorderWidth
+{
+  _contentBorderWidth = isfinite(contentBorderWidth) ? MAX(0, contentBorderWidth) : 0;
+  _contentBorderLayer.borderWidth = _contentBorderWidth;
 }
 
 - (void)setContentCornerRadius:(CGFloat)contentCornerRadius
@@ -507,6 +553,7 @@ static RNSideDrawerMotion RNSideDrawerCompileMotion(NSArray<NSNumber *> *config)
     };
     slot.frame = _contentHostView.bounds;
     [_contentHostView addSubview:slot];
+    [_contentHostView.layer addSublayer:_contentBorderLayer];
     [_contentView setDrawerOverlayColor:_overlayColor];
     [self applyContentCorners];
   }
@@ -1002,6 +1049,9 @@ static RNSideDrawerMotion RNSideDrawerCompileMotion(NSArray<NSNumber *> *config)
     _contentHostView.transform = contentTransform;
   }
   [_contentView setDrawerOverlayOpacity:_motion[RNSideDrawerMotionOverlayOpacity].evaluate(progress, 0)];
+  CGFloat borderOpacity = _motion[RNSideDrawerMotionContentBorderOpacity].evaluate(progress, 1);
+  CGFloat boundedBorderOpacity = RNSideDrawerClamp(borderOpacity, 0, 1);
+  if (_contentBorderLayer.opacity != boundedBorderOpacity) _contentBorderLayer.opacity = boundedBorderOpacity;
 }
 
 - (void)applySettlingInteractionState
@@ -1019,6 +1069,15 @@ static RNSideDrawerMotion RNSideDrawerCompileMotion(NSArray<NSNumber *> *config)
   _contentHostView.layer.cornerCurve = kCACornerCurveContinuous;
   _contentHostView.layer.cornerRadius = radius;
   _contentHostView.layer.masksToBounds = radius > 0;
+  _contentBorderLayer.contentsScale = screen.scale;
+  _contentBorderLayer.cornerCurve = kCACornerCurveContinuous;
+  _contentBorderLayer.cornerRadius = radius;
+}
+
+- (void)updateContentBorderColor
+{
+  UIColor *resolvedColor = [_contentBorderColor resolvedColorWithTraitCollection:self.traitCollection];
+  _contentBorderLayer.borderColor = resolvedColor.CGColor;
 }
 
 - (void)advanceSettleToTime:(CFTimeInterval)time

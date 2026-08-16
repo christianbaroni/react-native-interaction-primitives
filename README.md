@@ -93,6 +93,13 @@ export function Shell() {
       }
       drawerWidth={300}
       motion={{
+        content: {
+          border: {
+            color: 'rgba(255, 255, 255, 0.3)',
+            opacity: { inputRange: [0, 0.9], outputRange: [0, 1] },
+            width: 1,
+          },
+        },
         drawer: {
           opacity: { inputRange: [0, 0.9], outputRange: [0.1, 1] },
           scale: { inputRange: [0, 0.9], outputRange: [0.94, 1] },
@@ -125,7 +132,7 @@ The ref exposes `open`, `close`, and `toggle`; each accepts `{ animated?: boolea
 - `gestureEnabled?: boolean` — enables native drag gestures; commands and tap-to-close remain available.
 - `gestureReleaseHaptic?: HapticFeedbackType` — triggers once when a released swipe commits a change from the gesture's open/closed origin. A swipe that returns to its origin, commands, taps, cancellation, initial state, and animation completion never trigger it.
 - `initialOpen?: boolean` — selects the initial native endpoint without creating a controlled state loop.
-- `motion?: SideDrawerMotion` — declarative native interpolation for drawer/content opacity, uniform scale, `translateX`, `translateY`, and overlay color/opacity.
+- `motion?: SideDrawerMotion` — declarative native interpolation for drawer/content opacity, uniform scale, `translateX`, `translateY`, pane border, and overlay color/opacity.
 - `side?: 'start' | 'end'` — logical drawer side, resolved through native layout direction.
 - `onOpenChange?: (open) => void` — reports a completed endpoint change.
 - `onProgress?: (event) => void` — reports normalized progress and native phase. Both platforms skip payload construction when this observer is absent.
@@ -135,6 +142,8 @@ The default iOS screen radius reads the private `UIScreen` display-corner proper
 `onProgress` reports `progress` in `[0, 1]`, `phase`, `targetOpen`, and the `release`, `programmatic`, or `none` settling source. It is observational; writing the event back into layout is not part of the component contract.
 
 Each motion channel has matching `inputRange` and `outputRange` arrays with at least two points. Inputs must be finite, strictly increasing, and within `[0, 1]`; outputs must be finite. Native evaluation clamps before the first input and after the last. Translation outputs use React Native layout units: points on iOS and density-independent pixels on Android.
+
+`motion.content.border` draws above the application content and overlay while inheriting the pane's native corner mask and full-screen transform origin. `color` is required, `width` is measured in React Native layout units and defaults to `1`, and `opacity` is an optional motion interpolation. A missing border has zero width and adds no motion channel.
 
 Drawer transforms are applied to a full-screen native underlay host, so scale and translation keep a stable screen-relative origin throughout reveal. `drawerWidth` still owns both reveal distance and the caller drawer content's layout width.
 
