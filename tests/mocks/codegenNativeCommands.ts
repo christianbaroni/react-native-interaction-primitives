@@ -3,6 +3,8 @@ type NativeCommandCall = Readonly<{
   name: string;
 }>;
 
+type NativeCommand = (...args: unknown[]) => void;
+
 const calls: NativeCommandCall[] = [];
 
 export function __clearNativeCommandCalls(): void {
@@ -13,17 +15,12 @@ export function __getNativeCommandCalls(): readonly NativeCommandCall[] {
   return calls;
 }
 
-export default function codegenNativeCommands<Commands>(config: { supportedCommands: readonly string[] }): Commands {
-  const commands = Object.fromEntries(
-    config.supportedCommands.map(name => [
-      name,
-      (...args: unknown[]) => {
-        calls.push({ args, name });
-      },
-    ])
-  );
-  // The real Codegen transform proves this mapping; the test boundary can only
-  // construct its runtime command names from the supplied manifest.
-  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
-  return commands as Commands;
+export function codegenNativeCommands(config: { supportedCommands: readonly string[] }): Readonly<Record<string, NativeCommand>> {
+  const commands: Record<string, NativeCommand> = {};
+  for (const name of config.supportedCommands) {
+    commands[name] = (...args) => {
+      calls.push({ args, name });
+    };
+  }
+  return commands;
 }

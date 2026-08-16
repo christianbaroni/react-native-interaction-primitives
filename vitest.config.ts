@@ -16,10 +16,6 @@ export default defineConfig({
         replacement: path.resolve(rootDir, 'tests/mocks/react-native.ts'),
       },
       {
-        find: /^react-native\/Libraries\/Utilities\/codegenNativeCommands$/,
-        replacement: path.resolve(rootDir, 'tests/mocks/codegenNativeCommands.ts'),
-      },
-      {
         find: /^react-native-reanimated$/,
         replacement: path.resolve(rootDir, 'tests/mocks/react-native-reanimated.ts'),
       },

@@ -1,6 +1,6 @@
 import * as React from 'react';
 import codegenNativeComponent from './codegenNativeComponent';
-import codegenNativeCommands from './codegenNativeCommands';
+import { codegenNativeCommands } from './codegenNativeCommands';
 
 export type HostComponent<Props> = (props: Props) => unknown;
 export type ViewProps = Record<string, unknown>;
