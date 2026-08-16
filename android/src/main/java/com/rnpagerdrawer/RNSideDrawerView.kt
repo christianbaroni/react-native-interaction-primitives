@@ -239,6 +239,12 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
         val resumeSource = settlingSource
         val previousDrawerWidth = laidOutDrawerWidthPx
         val previousReveal = revealPx
+        val dragLowerBound = if (dragHasReachedNonnegative) 0f else dragLowerBoundPx
+        val hiddenLowerTravel = if (phase == Phase.Dragging) {
+            minOf(0f, dragRawRevealPx - dragLowerBound)
+        } else {
+            0f
+        }
         stopSettleFrames()
 
         laidOutDrawerWidthPx = drawerWidthPx
@@ -255,7 +261,9 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
             open -> laidOutDrawerWidthPx
             else -> 0f
         }
-        if (phase == Phase.Dragging) resetDragAnchor(lastPointerX)
+        if (phase == Phase.Dragging) {
+            reanchorDrag(lastPointerX, directRawReveal(revealPx) + hiddenLowerTravel)
+        }
         applyProgress()
 
         if (resumeSettling) {
@@ -332,13 +340,18 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
                     val deltaX = x - dragStartX
                     val deltaY = event.getY(pointerIndex) - downY
                     if (abs(deltaX) > touchSlop && abs(deltaX) > abs(deltaY)) hasDragged = true
-                    setDragRawRevealPx(dragStartRawRevealPx + (x - dragStartX) * revealDirection())
+                    updateDragReveal(x)
                     publishProgress()
                 }
                 return true
             }
             MotionEvent.ACTION_UP -> {
                 if (isDragging) {
+                    val pointerIndex = event.findPointerIndex(activePointerId)
+                    if (pointerIndex >= 0) {
+                        updateDragReveal(event.getX(pointerIndex))
+                        publishProgress()
+                    }
                     val tracker = ensureVelocityTracker()
                     tracker.computeCurrentVelocity(1000, maximumFlingVelocity.toFloat())
                     val revealVelocity = tracker.getXVelocity(activePointerId) * revealDirection()
@@ -470,7 +483,7 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
     }
 
     private fun settleFromRelease(velocityPxPerSecond: Float, performHaptic: Boolean) {
-        val presentedVelocity = velocityPxPerSecond * directVelocityScale(dragRawRevealPx)
+        val presentedVelocity = releaseRevealVelocity(velocityPxPerSecond)
         val naturalReveal = naturalTargetReveal(revealPx, presentedVelocity)
         val nextOpen = naturalReveal >= laidOutDrawerWidthPx * 0.5f
         if (performHaptic && nextOpen != gestureOriginOpen) gestureReleaseHaptic?.perform(this)
@@ -584,7 +597,7 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
         stopSettleFrames()
         settlePausedForTouch = false
         isDragging = true
-        resetDragAnchor(if (wasSettling) currentX else downX)
+        startDragMapping(if (wasSettling) currentX else downX)
         gestureOriginOpen = interruptedTarget
         targetOpen = interruptedTarget
         settlingSource = SettlingSource.None
@@ -610,7 +623,7 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
         val nextIndex = if (actionIndex == 0) 1 else 0
         activePointerId = event.getPointerId(nextIndex)
         lastPointerX = event.getX(nextIndex)
-        resetDragAnchor(lastPointerX)
+        reanchorDrag(lastPointerX)
         downX = dragStartX
         downY = event.getY(nextIndex)
         velocityTracker?.clear()
@@ -639,13 +652,17 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
         choreographer.removeFrameCallback(settleFrameCallback)
     }
 
-    private fun resetDragAnchor(currentX: Float) {
-        lastPointerX = currentX
-        dragStartX = currentX
-        dragStartRawRevealPx = directRawReveal(revealPx)
-        dragRawRevealPx = dragStartRawRevealPx
+    private fun startDragMapping(currentX: Float) {
         dragLowerBoundPx = minOf(revealPx, 0f)
         dragHasReachedNonnegative = revealPx >= 0f
+        reanchorDrag(currentX, directRawReveal(revealPx))
+    }
+
+    private fun reanchorDrag(currentX: Float, rawReveal: Float = dragRawRevealPx) {
+        lastPointerX = currentX
+        dragStartX = currentX
+        dragStartRawRevealPx = rawReveal
+        dragRawRevealPx = rawReveal
     }
 
     private fun yieldGestureToDescendant() {
@@ -663,15 +680,20 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
         (revealPx > 0f || revealDelta > 0f) && (revealPx < laidOutDrawerWidthPx || revealDelta < 0f)
 
     private fun setDragRawRevealPx(value: Float) {
-        var rawReveal = value
+        dragRawRevealPx = value
+        var presentedRawReveal = value
         if (!dragHasReachedNonnegative) {
-            rawReveal = max(dragLowerBoundPx, rawReveal)
-            if (rawReveal >= 0f) dragHasReachedNonnegative = true
+            presentedRawReveal = max(dragLowerBoundPx, presentedRawReveal)
+            if (presentedRawReveal >= 0f) dragHasReachedNonnegative = true
         }
-        if (dragHasReachedNonnegative) rawReveal = max(0f, rawReveal)
-        dragRawRevealPx = rawReveal
-        revealPx = if (rawReveal < 0f) rawReveal else directReveal(rawReveal)
+        if (dragHasReachedNonnegative) presentedRawReveal = max(0f, presentedRawReveal)
+        revealPx = if (presentedRawReveal < 0f) presentedRawReveal else directReveal(presentedRawReveal)
         applyProgress()
+    }
+
+    private fun updateDragReveal(currentX: Float) {
+        lastPointerX = currentX
+        setDragRawRevealPx(dragStartRawRevealPx + (currentX - dragStartX) * revealDirection())
     }
 
     private fun directReveal(rawReveal: Float): Float {
@@ -687,10 +709,17 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
         return laidOutDrawerWidthPx + limit * 0.5f * ln((1f + normalized) / (1f - normalized))
     }
 
-    private fun directVelocityScale(rawReveal: Float): Float {
-        if (rawReveal <= laidOutDrawerWidthPx) return 1f
-        val normalized = tanh((rawReveal - laidOutDrawerWidthPx) / overtravelLimitPx())
-        return 1f - normalized * normalized
+    private fun releaseRevealVelocity(velocityPxPerSecond: Float): Float {
+        if (!velocityPxPerSecond.isFinite()) return 0f
+        val lowerBound = if (dragHasReachedNonnegative) 0f else dragLowerBoundPx
+        if (dragRawRevealPx < lowerBound ||
+            (dragRawRevealPx <= lowerBound && velocityPxPerSecond < 0f)
+        ) {
+            return 0f
+        }
+        if (dragRawRevealPx <= laidOutDrawerWidthPx) return velocityPxPerSecond
+        val normalized = tanh((dragRawRevealPx - laidOutDrawerWidthPx) / overtravelLimitPx())
+        return velocityPxPerSecond * (1f - normalized * normalized)
     }
 
     private fun outwardExcursion(
