@@ -1,18 +1,21 @@
 import * as React from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Pager, type PagerRef } from 'react-native-pager-drawer';
 
 const PAGES = [
   { color: '#C9E7FF', eyebrow: 'Native gesture', title: 'Interrupt any settle' },
-  { color: '#D8F5D0', eyebrow: 'Bounded fling', title: 'One release, one page' },
+  { color: '#D8F5D0', eyebrow: 'Nested ownership', title: 'Scroll here, page at the edge' },
   { color: '#FFE2C5', eyebrow: 'Platform motion', title: 'No JS frame loop' },
 ] as const;
+
+const NESTED_SCROLL_CARDS = ['First edge', 'Inner range', 'Still scrolling', 'Last edge'] as const;
 
 export function PagerExample({ navigation }: { navigation: React.ReactNode }): React.JSX.Element {
   const pagerRef = React.useRef<PagerRef>(null);
   const insets = useSafeAreaInsets();
   const [page, setPage] = React.useState(1);
+  const [tapCount, setTapCount] = React.useState(0);
 
   const showPage = React.useCallback((nextPage: number) => {
     pagerRef.current?.setPage(nextPage);
@@ -41,6 +44,32 @@ export function PagerExample({ navigation }: { navigation: React.ReactNode }): R
             <View>
               <Text style={styles.eyebrow}>{item.eyebrow}</Text>
               <Text style={styles.title}>{item.title}</Text>
+              {index === 1 ? (
+                <>
+                  <ScrollView
+                    accessibilityLabel="Nested pager scroll gesture probe"
+                    contentContainerStyle={styles.nestedCards}
+                    directionalLockEnabled
+                    horizontal
+                    nestedScrollEnabled
+                    showsHorizontalScrollIndicator={false}
+                    style={styles.nestedScroll}
+                  >
+                    {NESTED_SCROLL_CARDS.map(label => (
+                      <View key={label} style={styles.nestedCard}>
+                        <Text style={styles.nestedCardText}>{label}</Text>
+                      </View>
+                    ))}
+                  </ScrollView>
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={() => setTapCount(count => count + 1)}
+                    style={({ pressed }) => [styles.tapProbe, pressed && styles.tapProbePressed]}
+                  >
+                    <Text style={styles.tapProbeText}>Tap target · {tapCount}</Text>
+                  </Pressable>
+                </>
+              ) : null}
             </View>
           </View>
         ))}
@@ -115,6 +144,27 @@ const styles = StyleSheet.create({
     paddingBottom: 10,
     paddingHorizontal: 12,
   },
+  nestedCard: {
+    alignItems: 'center',
+    backgroundColor: '#B9DDB0',
+    borderRadius: 14,
+    justifyContent: 'center',
+    minHeight: 52,
+    paddingHorizontal: 16,
+  },
+  nestedCards: {
+    gap: 8,
+    paddingRight: 20,
+  },
+  nestedCardText: {
+    color: '#254126',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  nestedScroll: {
+    marginRight: -28,
+    marginTop: 18,
+  },
   page: {
     borderRadius: 28,
     justifyContent: 'space-between',
@@ -139,6 +189,25 @@ const styles = StyleSheet.create({
   root: {
     backgroundColor: '#101318',
     flex: 1,
+  },
+  tapProbe: {
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    backgroundColor: '#254126',
+    borderRadius: 13,
+    justifyContent: 'center',
+    marginTop: 12,
+    minHeight: 44,
+    paddingHorizontal: 16,
+  },
+  tapProbePressed: {
+    opacity: 0.84,
+    transform: [{ scale: 0.96 }],
+  },
+  tapProbeText: {
+    color: '#F3FFF1',
+    fontSize: 13,
+    fontWeight: '700',
   },
   title: {
     color: '#20242A',

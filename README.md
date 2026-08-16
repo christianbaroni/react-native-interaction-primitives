@@ -72,6 +72,12 @@ The target must be an integer within the currently mounted page range. Invalid t
 
 `onPageScroll` receives the flat native transport, including `offset`, `position`, `page`, `pageCount`, `pageExtent`, `phase`, and the current anchor and target.
 
+### Pager gesture ownership
+
+A touched React Native scroll view on the pager's axis keeps a gesture while it can scroll in that exact direction. At an exhausted edge, the pager remains eligible for the next gesture instead of yielding to child overscroll. Cross-axis gestures remain with the touched content. Once the pager wins, it cancels the touched React responder and momentum in the touched scroll chain before moving the page; a swipe that changes pages cannot later activate the control beneath it.
+
+Custom React Native Gesture Handler relationships remain explicit. Compose the pager as an RNGH [`Native` gesture](https://docs.swmansion.com/react-native-gesture-handler/docs/gestures/use-native-gesture/) and make a child gesture block that native gesture when the child must take precedence (`blocksExternalGesture` in RNGH 2, `block` in RNGH 3). The package does not infer custom-handler intent from Android's undifferentiated interception signal, and it does not require RNGH when the app does not use it.
+
 ## Side drawer
 
 `SideDrawer` keeps its drawer slot fixed underneath one moving application surface. Directionally valid horizontal gestures can open or close it from anywhere in the component while taps and cross-axis gestures remain with the touched content. A touched React Native horizontal scroll view receives the gesture while it can scroll in that exact direction; at an exhausted edge, the drawer remains eligible instead of yielding to overscroll. Once the drawer wins, it interrupts momentum in touched vertical scroll content instead of waiting for deceleration to finish.

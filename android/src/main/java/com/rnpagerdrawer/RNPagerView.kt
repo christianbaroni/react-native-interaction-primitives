@@ -38,6 +38,7 @@ internal class RNPagerView(private val reactContext: ThemedReactContext) : ViewG
     private val pages = ArrayList<RNPagerPageView>()
     private val scroller = OverScroller(reactContext)
     private val targetResolverScroller = OverScroller(reactContext)
+    private val nestedScrollCoordinator = RNNestedScrollCoordinator(this)
     private val touchSlop = ViewConfiguration.get(reactContext).scaledTouchSlop
     private val maximumFlingVelocity = ViewConfiguration.get(reactContext).scaledMaximumFlingVelocity
 
@@ -46,6 +47,8 @@ internal class RNPagerView(private val reactContext: ThemedReactContext) : ViewG
     private var anchorPage = 0
     private var downCrossAxisPx = 0f
     private var downMainAxisPx = 0f
+    private var descendantRequestedDisallowIntercept = false
+    private var gestureEligible = false
     private var hasLaidOutPages = false
     private var interruptedSettleVelocityPxPerSecond = 0f
     private var isDragging = false
@@ -175,6 +178,7 @@ internal class RNPagerView(private val reactContext: ThemedReactContext) : ViewG
         if (!pagerScrollEnabled || pages.size <= 1) return false
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
+                gestureEligible = true
                 initializeTouch(event)
                 if (!scroller.isFinished) {
                     synchronizeScrollerFrame()
@@ -185,17 +189,26 @@ internal class RNPagerView(private val reactContext: ThemedReactContext) : ViewG
                 }
             }
             MotionEvent.ACTION_MOVE -> {
+                if (!gestureEligible) return false
                 val pointerIndex = event.findPointerIndex(activePointerId)
                 if (pointerIndex < 0) return false
                 val main = mainAxis(event, pointerIndex)
                 val cross = crossAxis(event, pointerIndex)
                 val mainDelta = main - downMainAxisPx
                 val crossDelta = cross - downCrossAxisPx
-                if (abs(mainDelta) > touchSlop && abs(mainDelta) > abs(crossDelta)) {
+                val mainAxisIntent = abs(mainDelta) > touchSlop && abs(mainDelta) > abs(crossDelta)
+                if (mainAxisIntent && touchedDescendantCanScroll(mainDelta)) {
+                    yieldGestureToDescendant()
+                    return false
+                }
+                if (mainAxisIntent) {
                     beginDraggingFromCurrentOffset()
                     lastMainAxisPx = main
                     parent?.requestDisallowInterceptTouchEvent(true)
                     return true
+                }
+                if (max(abs(mainDelta), abs(crossDelta)) > touchSlop && abs(crossDelta) >= abs(mainDelta)) {
+                    yieldGestureToDescendant()
                 }
             }
             MotionEvent.ACTION_CANCEL, MotionEvent.ACTION_UP -> finishTouch()
@@ -203,10 +216,25 @@ internal class RNPagerView(private val reactContext: ThemedReactContext) : ViewG
         return false
     }
 
+    override fun requestDisallowInterceptTouchEvent(disallowIntercept: Boolean) {
+        if (!disallowIntercept) {
+            descendantRequestedDisallowIntercept = false
+            if (isDragging) return
+            super.requestDisallowInterceptTouchEvent(false)
+            return
+        }
+        if (gestureEligible && !isDragging) {
+            descendantRequestedDisallowIntercept = true
+            return
+        }
+        super.requestDisallowInterceptTouchEvent(true)
+    }
+
     override fun onTouchEvent(event: MotionEvent): Boolean {
         if (!pagerScrollEnabled || pages.isEmpty()) return false
         if (event.actionMasked == MotionEvent.ACTION_DOWN) {
             if (isDragging) return true
+            gestureEligible = true
             initializeTouch(event)
             if (!scroller.isFinished) {
                 synchronizeScrollerFrame()
@@ -325,14 +353,39 @@ internal class RNPagerView(private val reactContext: ThemedReactContext) : ViewG
         downMainAxisPx = mainAxis(event, 0)
         downCrossAxisPx = crossAxis(event, 0)
         lastMainAxisPx = downMainAxisPx
+        descendantRequestedDisallowIntercept = false
         isDragging = false
     }
 
     private fun finishTouch() {
         activePointerId = INVALID_POINTER_ID
+        gestureEligible = false
         isDragging = false
+        descendantRequestedDisallowIntercept = false
+        super.requestDisallowInterceptTouchEvent(false)
         velocityTracker?.recycle()
         velocityTracker = null
+    }
+
+    private fun yieldGestureToDescendant() {
+        gestureEligible = false
+        if (descendantRequestedDisallowIntercept) super.requestDisallowInterceptTouchEvent(true)
+    }
+
+    private fun touchedDescendantCanScroll(mainAxisDelta: Float): Boolean {
+        return if (orientation == Orientation.Horizontal) {
+            nestedScrollCoordinator.touchedDescendantCanScrollHorizontally(
+                downMainAxisPx,
+                downCrossAxisPx,
+                mainAxisDelta,
+            )
+        } else {
+            nestedScrollCoordinator.touchedDescendantCanScrollVertically(
+                downCrossAxisPx,
+                downMainAxisPx,
+                mainAxisDelta,
+            )
+        }
     }
 
     private fun handlePointerUp(event: MotionEvent) {

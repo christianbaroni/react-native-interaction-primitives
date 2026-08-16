@@ -13,7 +13,6 @@ import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.ReadableArray
 import com.facebook.react.bridge.WritableMap
 import com.facebook.react.uimanager.ThemedReactContext
-import com.facebook.react.uimanager.TouchTargetHelper
 import com.facebook.react.uimanager.UIManagerHelper
 import kotlin.math.abs
 import kotlin.math.max
@@ -46,7 +45,7 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
     private val viewConfiguration = ViewConfiguration.get(reactContext)
     private val touchSlop = viewConfiguration.scaledTouchSlop
     private val maximumFlingVelocity = viewConfiguration.scaledMaximumFlingVelocity
-    private val nativeTouchTarget = IntArray(1)
+    private val nestedScrollCoordinator = RNNestedScrollCoordinator(this)
 
     private var panelView: RNSideDrawerPanelView? = null
     private var contentView: RNSideDrawerContentView? = null
@@ -817,15 +816,7 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
     }
 
     private fun touchedDescendantCanScrollHorizontally(deltaX: Float): Boolean {
-        val scrollDirection = if (deltaX > 0f) -1 else 1
-        nativeTouchTarget[0] = View.NO_ID
-        TouchTargetHelper.findTargetTagForTouch(downX, downY, this, nativeTouchTarget)
-        var view = if (nativeTouchTarget[0] == View.NO_ID) null else findViewById<View>(nativeTouchTarget[0])
-        while (view != null && view !== this) {
-            if (view.canScrollHorizontally(scrollDirection)) return true
-            view = view.parent as? View
-        }
-        return false
+        return nestedScrollCoordinator.touchedDescendantCanScrollHorizontally(downX, downY, deltaX)
     }
 
     private fun openingDirection(): Int {
