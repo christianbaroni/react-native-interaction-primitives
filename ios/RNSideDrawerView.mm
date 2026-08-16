@@ -1018,9 +1018,10 @@ static RNSideDrawerMotion RNSideDrawerCompileMotion(NSArray<NSNumber *> *config)
 
 - (void)applyContentReveal:(CGFloat)reveal
 {
-  [self updateCountertrackedFramesForOffset:[self currentPhysicalOffset]];
+  CGFloat offset = [self currentPhysicalOffset];
+  [self updateCountertrackedFramesForOffset:offset];
   CGPoint center = CGPointMake(
-      [self currentPhysicalOffset] + self.bounds.size.width * 0.5,
+      offset + self.bounds.size.width * 0.5,
       self.bounds.size.height * 0.5);
   _contentHostView.center = CGPointMake(center.x + _revealDirection * reveal, center.y);
 }

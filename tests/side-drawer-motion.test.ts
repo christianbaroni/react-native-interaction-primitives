@@ -16,11 +16,11 @@ describe('SideDrawer motion compilation', () => {
       compileSideDrawerMotion({
         content: { opacity: { inputRange: [0, 0.5, 0.5], outputRange: [0, 0.5, 1] } },
       })
-    ).toThrow('inputRange must be finite, strictly increasing, and within [0, 1]');
+    ).toThrow('motion.content.opacity.inputRange must be finite, strictly increasing, and within [0, 1]');
     expect(() =>
       compileSideDrawerMotion({
         content: { scale: { inputRange: [0, 1], outputRange: [1] } },
       })
-    ).toThrow('matching input and output ranges of at least two points');
+    ).toThrow('motion.content.scale must have matching input and output ranges of at least two points');
   });
 });

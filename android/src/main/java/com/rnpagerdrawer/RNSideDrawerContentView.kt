@@ -83,6 +83,7 @@ internal class RNSideDrawerContentView(reactContext: ThemedReactContext) : Frame
     private var clipPathDirty = true
     private var shouldClipCorners = false
     private val scrim = View(reactContext).apply {
+        forceHasOverlappingRendering(false)
         isClickable = false
         setBackgroundColor(Color.TRANSPARENT)
         setOnClickListener { onScrimPress?.invoke() }
