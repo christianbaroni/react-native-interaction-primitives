@@ -298,6 +298,26 @@ internal class RNSideDrawerContentView(reactContext: ThemedReactContext) : Frame
         super.addView(border, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
     }
 
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        // UIManager owns React child frames; this host measures only its private presentation layers.
+        val measuredWidth = MeasureSpec.getSize(widthMeasureSpec)
+        val measuredHeight = MeasureSpec.getSize(heightMeasureSpec)
+        setMeasuredDimension(measuredWidth, measuredHeight)
+
+        val exactWidth = MeasureSpec.makeMeasureSpec(measuredWidth, MeasureSpec.EXACTLY)
+        val exactHeight = MeasureSpec.makeMeasureSpec(measuredHeight, MeasureSpec.EXACTLY)
+        scrim.measure(exactWidth, exactHeight)
+        border.measure(exactWidth, exactHeight)
+    }
+
+    override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
+        // React children keep the frames assigned by UIManager.
+        val width = right - left
+        val height = bottom - top
+        scrim.layout(0, 0, width, height)
+        border.layout(0, 0, width, height)
+    }
+
     override fun onSizeChanged(width: Int, height: Int, oldWidth: Int, oldHeight: Int) {
         super.onSizeChanged(width, height, oldWidth, oldHeight)
         clipPathDirty = true
