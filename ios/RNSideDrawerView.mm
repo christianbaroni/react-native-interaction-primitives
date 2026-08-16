@@ -86,6 +86,7 @@ typedef NS_ENUM(NSInteger, RNSideDrawerSettlingSource) {
 - (void)applyContentCorners;
 - (void)updateContentBorderColor;
 - (void)updateContentShadowColor;
+- (UIScreen *)currentScreen;
 
 - (void)startSettleDisplayLink;
 - (void)stopSettleDisplayLink;
@@ -127,6 +128,7 @@ typedef NS_ENUM(NSInteger, RNSideDrawerSettlingSource) {
 
   UIViewPropertyAnimator *_settleAnimator;
   CADisplayLink *_settleDisplayLink;
+  UIScreen *_settleDisplayScreen;
   BOOL _settleActive;
   BOOL _settlePausedForTracking;
   CGFloat _settleVelocity;
@@ -328,6 +330,11 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
 - (void)didMoveToWindow
 {
   [super didMoveToWindow];
+  if (self.window == nil) {
+    [self stopSettleDisplayLink];
+  } else {
+    [self updateSettleDisplayLink];
+  }
   [self applyContentCorners];
   [self updateContentBorderColor];
   [self updateContentShadowColor];
@@ -341,6 +348,7 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
     [self updateContentBorderColor];
     [self updateContentShadowColor];
   }
+  if (_settleDisplayLink != nil) [self startSettleDisplayLink];
 }
 
 #pragma mark - Properties
@@ -508,7 +516,9 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
     _hapticFeedback = nil;
     return;
   }
-  if (_hapticFeedback == nil) _hapticFeedback = [RNPagerDrawerHapticFeedback new];
+  if (_hapticFeedback == nil) {
+    _hapticFeedback = [[RNPagerDrawerHapticFeedback alloc] initWithView:self];
+  }
   _hapticFeedback.type = gestureReleaseHaptic;
 }
 
@@ -740,7 +750,7 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
                   velocity:(CGFloat)velocity
 {
   CGFloat targetPosition = open ? _laidOutDrawerWidth : 0;
-  UIScreen *screen = self.window.screen ?: UIScreen.mainScreen;
+  UIScreen *screen = [self currentScreen];
   CGFloat pixelTolerance = 1.0 / MAX(screen.scale, 1.0);
   CGFloat resolvedVelocity = isfinite(velocity) ? velocity : 0;
   _reveal = reveal;
@@ -825,6 +835,7 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
   _settlingSource = RNSideDrawerSettlingSourceNone;
   _progressSnapshotPending = NO;
   _suppressCurrentDragRelease = NO;
+  _hapticFeedback = nil;
 }
 
 #pragma mark - Gesture ownership
@@ -968,7 +979,8 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
 {
   if (targetOpen != _gestureOriginOpen && !_gestureHapticTriggered) {
     _gestureHapticTriggered = YES;
-    [_hapticFeedback trigger];
+    CGPoint location = [_scrollView.panGestureRecognizer locationInView:self];
+    [_hapticFeedback triggerAtLocation:location];
   }
   CGFloat targetPosition = targetOpen ? _laidOutDrawerWidth : 0;
   CGFloat transferredVelocity = revealVelocity * _activeInteraction.releaseVelocityTransfer;
@@ -1172,9 +1184,14 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
   _contentView.accessibilityElementsHidden = NO;
 }
 
+- (UIScreen *)currentScreen
+{
+  return self.window.windowScene.screen ?: self.window.screen ?: UIScreen.mainScreen;
+}
+
 - (void)applyContentCorners
 {
-  UIScreen *screen = self.window.screen ?: UIScreen.mainScreen;
+  UIScreen *screen = [self currentScreen];
   CGFloat radius = _contentCornerRadius >= 0 ? _contentCornerRadius : RNSideDrawerScreenCornerRadius(screen);
   _contentHostView.layer.cornerCurve = kCACornerCurveContinuous;
   _contentHostView.layer.cornerRadius = radius;
@@ -1214,21 +1231,27 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
 
 - (void)startSettleDisplayLink
 {
-  if (_settleDisplayLink != nil) return;
-  _settleDisplayLink = [CADisplayLink displayLinkWithTarget:self selector:@selector(stepSettleDisplayLink:)];
+  UIScreen *screen = [self currentScreen];
+  if (_settleDisplayLink != nil && _settleDisplayScreen != screen) [self stopSettleDisplayLink];
+  if (_settleDisplayLink == nil) {
+    _settleDisplayLink = [screen displayLinkWithTarget:self selector:@selector(stepSettleDisplayLink:)];
+    if (_settleDisplayLink == nil) return;
+    _settleDisplayScreen = screen;
+    [_settleDisplayLink addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
+  }
   if (@available(iOS 15.0, *)) {
-    NSInteger maximumFramesPerSecond = (self.window.screen ?: UIScreen.mainScreen).maximumFramesPerSecond;
+    NSInteger maximumFramesPerSecond = screen.maximumFramesPerSecond;
     Float64 preferred = MIN(120, maximumFramesPerSecond);
     Float64 minimum = MIN(80, preferred);
     _settleDisplayLink.preferredFrameRateRange = CAFrameRateRangeMake(minimum, preferred, preferred);
   }
-  [_settleDisplayLink addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
 }
 
 - (void)stopSettleDisplayLink
 {
   [_settleDisplayLink invalidate];
   _settleDisplayLink = nil;
+  _settleDisplayScreen = nil;
 }
 
 - (void)updateSettleDisplayLink
@@ -1245,6 +1268,10 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
 - (void)stepSettleDisplayLink:(CADisplayLink *)displayLink
 {
   (void)displayLink;
+  if (_settleDisplayScreen != [self currentScreen]) {
+    [self startSettleDisplayLink];
+    return;
+  }
   if (!_settleActive || _phase != RNSideDrawerPhaseSettling) {
     [self stopSettleDisplayLink];
     return;

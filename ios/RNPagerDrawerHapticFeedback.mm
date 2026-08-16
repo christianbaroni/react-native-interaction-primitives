@@ -5,19 +5,27 @@
 #import <UIKit/UISelectionFeedbackGenerator.h>
 
 @interface RNPagerDrawerHapticFeedback ()
+- (void)clearGenerator;
 - (nullable UIFeedbackGenerator *)generator;
 @end
 
 @implementation RNPagerDrawerHapticFeedback {
+  __weak UIView *_view;
   UIFeedbackGenerator *_generator;
 }
 
-- (instancetype)init
+- (instancetype)initWithView:(UIView *)view
 {
   if ((self = [super init])) {
+    _view = view;
     _type = @"none";
   }
   return self;
+}
+
+- (void)dealloc
+{
+  [self clearGenerator];
 }
 
 - (void)setType:(NSString *)type
@@ -25,7 +33,7 @@
   NSString *nextType = type ?: @"none";
   if ([_type isEqualToString:nextType]) return;
   _type = [nextType copy];
-  _generator = nil;
+  [self clearGenerator];
 }
 
 - (void)prepare
@@ -33,32 +41,68 @@
   [[self generator] prepare];
 }
 
-- (void)trigger
+- (void)triggerAtLocation:(CGPoint)location
 {
   UIFeedbackGenerator *generator = [self generator];
   if (generator == nil) return;
   if ([generator isKindOfClass:UISelectionFeedbackGenerator.class]) {
-    [(UISelectionFeedbackGenerator *)generator selectionChanged];
+    UISelectionFeedbackGenerator *selectionGenerator = (UISelectionFeedbackGenerator *)generator;
+    if (@available(iOS 17.5, *)) {
+      [selectionGenerator selectionChangedAtLocation:location];
+    } else {
+      [selectionGenerator selectionChanged];
+    }
     return;
   }
   if ([generator isKindOfClass:UINotificationFeedbackGenerator.class]) {
     UINotificationFeedbackType notificationType = UINotificationFeedbackTypeSuccess;
     if ([_type isEqualToString:@"warning"]) notificationType = UINotificationFeedbackTypeWarning;
     if ([_type isEqualToString:@"error"]) notificationType = UINotificationFeedbackTypeError;
-    [(UINotificationFeedbackGenerator *)generator notificationOccurred:notificationType];
+    UINotificationFeedbackGenerator *notificationGenerator = (UINotificationFeedbackGenerator *)generator;
+    if (@available(iOS 17.5, *)) {
+      [notificationGenerator notificationOccurred:notificationType atLocation:location];
+    } else {
+      [notificationGenerator notificationOccurred:notificationType];
+    }
     return;
   }
-  [(UIImpactFeedbackGenerator *)generator impactOccurred];
+  UIImpactFeedbackGenerator *impactGenerator = (UIImpactFeedbackGenerator *)generator;
+  if (@available(iOS 17.5, *)) {
+    [impactGenerator impactOccurredAtLocation:location];
+  } else {
+    [impactGenerator impactOccurred];
+  }
+}
+
+- (void)clearGenerator
+{
+  if (_generator == nil) return;
+  if (@available(iOS 17.5, *)) {
+    id<UIInteraction> interaction = (id<UIInteraction>)_generator;
+    [interaction.view removeInteraction:interaction];
+  }
+  _generator = nil;
 }
 
 - (nullable UIFeedbackGenerator *)generator
 {
   if (_generator != nil) return _generator;
+  UIView *view = _view;
+  if (view == nil) return nil;
+
   if ([_type isEqualToString:@"selection"]) {
-    _generator = [UISelectionFeedbackGenerator new];
+    if (@available(iOS 17.5, *)) {
+      _generator = [UISelectionFeedbackGenerator feedbackGeneratorForView:view];
+    } else {
+      _generator = [UISelectionFeedbackGenerator new];
+    }
   } else if ([_type isEqualToString:@"success"] || [_type isEqualToString:@"warning"] ||
              [_type isEqualToString:@"error"]) {
-    _generator = [UINotificationFeedbackGenerator new];
+    if (@available(iOS 17.5, *)) {
+      _generator = [UINotificationFeedbackGenerator feedbackGeneratorForView:view];
+    } else {
+      _generator = [UINotificationFeedbackGenerator new];
+    }
   } else {
     UIImpactFeedbackStyle style;
     if ([_type isEqualToString:@"light"]) style = UIImpactFeedbackStyleLight;
@@ -67,7 +111,11 @@
     else if ([_type isEqualToString:@"soft"]) style = UIImpactFeedbackStyleSoft;
     else if ([_type isEqualToString:@"rigid"]) style = UIImpactFeedbackStyleRigid;
     else return nil;
-    _generator = [[UIImpactFeedbackGenerator alloc] initWithStyle:style];
+    if (@available(iOS 17.5, *)) {
+      _generator = [UIImpactFeedbackGenerator feedbackGeneratorWithStyle:style forView:view];
+    } else {
+      _generator = [[UIImpactFeedbackGenerator alloc] initWithStyle:style];
+    }
   }
   return _generator;
 }
