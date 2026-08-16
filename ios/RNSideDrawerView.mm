@@ -7,6 +7,7 @@
 
 #import <React/UIView+React.h>
 #import <QuartzCore/QuartzCore.h>
+#include <algorithm>
 #include <array>
 #include <float.h>
 #import <math.h>
@@ -58,10 +59,14 @@ struct RNSideDrawerInterpolation {
     if (!enabled) return fallback;
     if (progress <= firstInput) return firstOutput;
     if (progress >= lastInput) return lastOutput;
-    for (const auto &segment : segments) {
-      if (progress <= segment.upperInput) return segment.slope * progress + segment.intercept;
-    }
-    return lastOutput;
+    auto segment = std::lower_bound(
+        segments.begin(),
+        segments.end(),
+        progress,
+        [](const RNSideDrawerMotionSegment &candidate, CGFloat value) {
+          return candidate.upperInput < value;
+        });
+    return segment->slope * progress + segment->intercept;
   }
 };
 

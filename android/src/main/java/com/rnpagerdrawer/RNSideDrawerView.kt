@@ -56,10 +56,18 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
         fun evaluate(progress: Float): Float {
             if (progress <= firstInput) return firstOutput
             if (progress >= lastInput) return lastOutput
-            for (segment in segments) {
-                if (progress <= segment.upperInput) return segment.slope * progress + segment.intercept
+            var lower = 0
+            var upper = segments.lastIndex
+            while (lower < upper) {
+                val middle = (lower + upper) ushr 1
+                if (progress <= segments[middle].upperInput) {
+                    upper = middle
+                } else {
+                    lower = middle + 1
+                }
             }
-            return lastOutput
+            val segment = segments[lower]
+            return segment.slope * progress + segment.intercept
         }
     }
 
