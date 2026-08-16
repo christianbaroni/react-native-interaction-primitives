@@ -4803,7 +4803,7 @@ __metadata:
     react: "npm:19.1.4"
     react-native: "npm:0.81.6"
     react-native-pager-drawer: "portal:.."
-    react-native-safe-area-context: "npm:^5.5.2"
+    react-native-safe-area-context: "npm:5.5.2"
     typescript: "npm:^5.8.3"
   languageName: unknown
   linkType: soft
@@ -5003,13 +5003,13 @@ __metadata:
   languageName: node
   linkType: soft
 
-"react-native-safe-area-context@npm:^5.5.2":
-  version: 5.9.0
-  resolution: "react-native-safe-area-context@npm:5.9.0"
+"react-native-safe-area-context@npm:5.5.2":
+  version: 5.5.2
+  resolution: "react-native-safe-area-context@npm:5.5.2"
   peerDependencies:
     react: "*"
     react-native: "*"
-  checksum: 10c0/f8d7634b7ab114e21c88c87de044f2a5d94d3f9641c9c203e924733c014f0c8f5a4fd95fd70275b400e6696245a5d78b263635c0be175c882b02b723a580678e
+  checksum: 10c0/529cafcafbc1d994f6d9c9be41ae4f78768b7c103a22265d3fe5223a930249e0a07a934b5ec358ce510622061f339a20c2147b620bd15032366b12b4258c2ce5
   languageName: node
   linkType: hard
 

@@ -14,7 +14,7 @@
     "react": "19.1.4",
     "react-native": "0.81.6",
     "react-native-pager-drawer": "portal:..",
-    "react-native-safe-area-context": "^5.5.2"
+    "react-native-safe-area-context": "5.5.2"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",
