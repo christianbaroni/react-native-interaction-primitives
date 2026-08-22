@@ -50,7 +50,7 @@ internal class RNNestedScrollCoordinator(private val container: ViewGroup) {
         nativeTouchTarget[0] = View.NO_ID
         TouchTargetHelper.findTargetTagForTouch(x, y, container, nativeTouchTarget)
         var view = if (nativeTouchTarget[0] == View.NO_ID) null else container.findViewById<View>(nativeTouchTarget[0])
-        while (view != null && view !== container) {
+        while (view != null && view !== container && view.id != View.NO_ID) {
             val canScroll = if (horizontal) {
                 view.canScrollHorizontally(direction)
             } else {
