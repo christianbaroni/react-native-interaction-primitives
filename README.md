@@ -158,14 +158,14 @@ The default iOS screen radius reads the private `UIScreen` display-corner proper
 
 ### Interaction
 
-`interaction.spring` exposes the physical mass, stiffness, and damping coefficient used by released gestures and animated commands. Values must be finite and greater than zero. The default is the existing critically damped response:
+`interaction.spring` exposes the physical mass, stiffness, and damping coefficient used by released gestures and animated commands. Values must be finite and greater than zero. The default is:
 
 ```tsx
 interaction={{
   spring: {
-    mass: 1,
-    stiffness: 483.61061565337855,
-    damping: 43.982297150257104,
+    mass: 0.8,
+    stiffness: 680,
+    damping: 46,
   },
 }}
 ```

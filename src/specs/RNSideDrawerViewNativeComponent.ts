@@ -40,9 +40,9 @@ export interface NativeProps extends ViewProps {
   releaseVelocitySensitivity?: WithDefault<Double, 1>;
   releaseVelocityTransfer?: WithDefault<Double, 1>;
   side?: WithDefault<'start' | 'end', 'start'>;
-  springDamping?: WithDefault<Double, 43.982297150257104>;
-  springMass?: WithDefault<Double, 1>;
-  springStiffness?: WithDefault<Double, 483.61061565337855>;
+  springDamping?: WithDefault<Double, 46>;
+  springMass?: WithDefault<Double, 0.8>;
+  springStiffness?: WithDefault<Double, 680>;
 }
 
 interface NativeCommands {

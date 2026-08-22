@@ -180,10 +180,10 @@ describe('SideDrawer API', () => {
       releaseOpenThreshold: 0.5,
       releaseVelocitySensitivity: 1,
       releaseVelocityTransfer: 1,
-      springMass: 1,
+      springDamping: 46,
+      springMass: 0.8,
+      springStiffness: 680,
     });
-    expect(lastNativeProps('RNSideDrawerView').springDamping).toBeCloseTo(14 * Math.PI);
-    expect(lastNativeProps('RNSideDrawerView').springStiffness).toBeCloseTo((7 * Math.PI) ** 2);
 
     rerender(
       drawer(undefined, {

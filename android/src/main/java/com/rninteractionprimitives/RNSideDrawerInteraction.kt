@@ -45,18 +45,48 @@ internal const val DEFAULT_SIDE_DRAWER_OVERDRAG_DP = 4f
 internal const val DEFAULT_SIDE_DRAWER_RELEASE_OPEN_THRESHOLD = 0.5
 internal const val DEFAULT_SIDE_DRAWER_RELEASE_VELOCITY_SENSITIVITY = 1.0
 internal const val DEFAULT_SIDE_DRAWER_RELEASE_VELOCITY_TRANSFER = 1.0
-private const val DEFAULT_SIDE_DRAWER_SPRING_MASS = 1.0
-private val DEFAULT_SIDE_DRAWER_SPRING_STIFFNESS = 49.0 * Math.PI * Math.PI
-private val DEFAULT_SIDE_DRAWER_SPRING_DAMPING = 14.0 * Math.PI
+internal const val DEFAULT_SIDE_DRAWER_SPRING_MASS = 0.8
+internal const val DEFAULT_SIDE_DRAWER_SPRING_STIFFNESS = 680.0
+internal const val DEFAULT_SIDE_DRAWER_SPRING_DAMPING = 46.0
 
-private val DEFAULT_SIDE_DRAWER_SPRING = SideDrawerSpring(
+private fun createSideDrawerSpring(mass: Double, stiffness: Double, damping: Double): SideDrawerSpring {
+    val naturalFrequencySquared = stiffness / mass
+    val dampingRate = (damping / 2.0) / mass
+    val naturalFrequency = sqrt(naturalFrequencySquared)
+    val tolerance = 32.0 * Math.ulp(1.0) * max(dampingRate, naturalFrequency)
+    val dampingType: SideDrawerDampingType
+    val responseRate: Double
+    when {
+        abs(dampingRate - naturalFrequency) <= tolerance -> {
+            dampingType = SideDrawerDampingType.CriticallyDamped
+            responseRate = 0.0
+        }
+        dampingRate < naturalFrequency -> {
+            val ratio = dampingRate / naturalFrequency
+            dampingType = SideDrawerDampingType.Underdamped
+            responseRate = naturalFrequency * sqrt(max(0.0, 1.0 - ratio * ratio))
+        }
+        else -> {
+            val ratio = naturalFrequency / dampingRate
+            dampingType = SideDrawerDampingType.Overdamped
+            responseRate = dampingRate * sqrt(max(0.0, 1.0 - ratio * ratio))
+        }
+    }
+    return SideDrawerSpring(
+        mass,
+        stiffness,
+        damping,
+        naturalFrequencySquared,
+        dampingRate,
+        responseRate,
+        dampingType,
+    )
+}
+
+private val DEFAULT_SIDE_DRAWER_SPRING = createSideDrawerSpring(
     DEFAULT_SIDE_DRAWER_SPRING_MASS,
     DEFAULT_SIDE_DRAWER_SPRING_STIFFNESS,
     DEFAULT_SIDE_DRAWER_SPRING_DAMPING,
-    DEFAULT_SIDE_DRAWER_SPRING_STIFFNESS / DEFAULT_SIDE_DRAWER_SPRING_MASS,
-    (DEFAULT_SIDE_DRAWER_SPRING_DAMPING / 2.0) / DEFAULT_SIDE_DRAWER_SPRING_MASS,
-    0.0,
-    SideDrawerDampingType.CriticallyDamped,
 )
 
 internal fun defaultSideDrawerInteraction(overdragPx: Float) = SideDrawerInteraction(
@@ -87,35 +117,7 @@ internal fun resolveSideDrawerSpring(mass: Double, stiffness: Double, damping: D
         return DEFAULT_SIDE_DRAWER_SPRING
     }
 
-    val naturalFrequency = sqrt(naturalFrequencySquared)
-    val tolerance = 32.0 * Math.ulp(1.0) * max(dampingRate, naturalFrequency)
-    val dampingType: SideDrawerDampingType
-    val responseRate: Double
-    when {
-        abs(dampingRate - naturalFrequency) <= tolerance -> {
-            dampingType = SideDrawerDampingType.CriticallyDamped
-            responseRate = 0.0
-        }
-        dampingRate < naturalFrequency -> {
-            val ratio = dampingRate / naturalFrequency
-            dampingType = SideDrawerDampingType.Underdamped
-            responseRate = naturalFrequency * sqrt(max(0.0, 1.0 - ratio * ratio))
-        }
-        else -> {
-            val ratio = naturalFrequency / dampingRate
-            dampingType = SideDrawerDampingType.Overdamped
-            responseRate = dampingRate * sqrt(max(0.0, 1.0 - ratio * ratio))
-        }
-    }
-    return SideDrawerSpring(
-        resolvedMass,
-        resolvedStiffness,
-        resolvedDamping,
-        naturalFrequencySquared,
-        dampingRate,
-        responseRate,
-        dampingType,
-    )
+    return createSideDrawerSpring(resolvedMass, resolvedStiffness, resolvedDamping)
 }
 
 internal fun evaluateSideDrawerSpring(

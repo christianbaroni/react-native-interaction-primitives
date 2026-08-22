@@ -8,40 +8,21 @@
 
 namespace {
 
-constexpr CGFloat kDefaultSpringMass = 1;
-constexpr CGFloat kDefaultSpringStiffness = 49 * M_PI * M_PI;
-constexpr CGFloat kDefaultSpringDamping = 14 * M_PI;
+constexpr CGFloat kDefaultSpringMass = 0.8;
+constexpr CGFloat kDefaultSpringStiffness = 680;
+constexpr CGFloat kDefaultSpringDamping = 46;
 constexpr CGFloat kDefaultOverdrag = 4;
 constexpr CGFloat kMillisecondsPerSecond = 1000;
-
-const rnsidedrawer::Spring kDefaultSpring = {
-    kDefaultSpringMass,
-    kDefaultSpringStiffness,
-    kDefaultSpringDamping,
-    kDefaultSpringStiffness / kDefaultSpringMass,
-    (kDefaultSpringDamping / 2) / kDefaultSpringMass,
-    0,
-    rnsidedrawer::DampingType::CriticallyDamped};
 
 CGFloat clamp(CGFloat value, CGFloat minimum, CGFloat maximum) noexcept
 {
   return std::min(maximum, std::max(minimum, value));
 }
 
-rnsidedrawer::Spring resolveSpring(CGFloat mass, CGFloat stiffness, CGFloat damping) noexcept
+rnsidedrawer::Spring makeSpring(CGFloat mass, CGFloat stiffness, CGFloat damping) noexcept
 {
-  if (!std::isfinite(mass) || mass <= 0 || !std::isfinite(stiffness) || stiffness <= 0 ||
-      !std::isfinite(damping) || damping <= 0) {
-    return kDefaultSpring;
-  }
-
   const CGFloat naturalFrequencySquared = stiffness / mass;
   const CGFloat dampingRate = (damping / 2) / mass;
-  if (!std::isfinite(naturalFrequencySquared) || naturalFrequencySquared <= 0 ||
-      !std::isfinite(dampingRate) || dampingRate <= 0) {
-    return kDefaultSpring;
-  }
-
   const CGFloat naturalFrequency = std::sqrt(naturalFrequencySquared);
   const CGFloat tolerance =
       32 * std::numeric_limits<CGFloat>::epsilon() * std::max(dampingRate, naturalFrequency);
@@ -77,6 +58,26 @@ rnsidedrawer::Spring resolveSpring(CGFloat mass, CGFloat stiffness, CGFloat damp
       dampingRate,
       dampingRate * std::sqrt(std::max<CGFloat>(0, 1 - ratio * ratio)),
       rnsidedrawer::DampingType::Overdamped};
+}
+
+const rnsidedrawer::Spring kDefaultSpring =
+    makeSpring(kDefaultSpringMass, kDefaultSpringStiffness, kDefaultSpringDamping);
+
+rnsidedrawer::Spring resolveSpring(CGFloat mass, CGFloat stiffness, CGFloat damping) noexcept
+{
+  if (!std::isfinite(mass) || mass <= 0 || !std::isfinite(stiffness) || stiffness <= 0 ||
+      !std::isfinite(damping) || damping <= 0) {
+    return kDefaultSpring;
+  }
+
+  const CGFloat naturalFrequencySquared = stiffness / mass;
+  const CGFloat dampingRate = (damping / 2) / mass;
+  if (!std::isfinite(naturalFrequencySquared) || naturalFrequencySquared <= 0 ||
+      !std::isfinite(dampingRate) || dampingRate <= 0) {
+    return kDefaultSpring;
+  }
+
+  return makeSpring(mass, stiffness, damping);
 }
 
 CGFloat outwardDistanceAtTime(

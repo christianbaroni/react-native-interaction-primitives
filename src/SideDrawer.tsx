@@ -12,9 +12,9 @@ const DEFAULT_OVERDRAG = 4;
 const DEFAULT_RELEASE_OPEN_THRESHOLD = 0.5;
 const DEFAULT_RELEASE_VELOCITY_SENSITIVITY = 1;
 const DEFAULT_RELEASE_VELOCITY_TRANSFER = 1;
-const DEFAULT_SPRING_DAMPING = 14 * Math.PI;
-const DEFAULT_SPRING_MASS = 1;
-const DEFAULT_SPRING_STIFFNESS = (7 * Math.PI) ** 2;
+const DEFAULT_SPRING_DAMPING = 46;
+const DEFAULT_SPRING_MASS = 0.8;
+const DEFAULT_SPRING_STIFFNESS = 680;
 
 type NativeSideDrawerRef = React.ComponentRef<typeof NativeSideDrawerView> | null;
 type NativeSideDrawerEvent<T> = Readonly<{ nativeEvent: T }>;

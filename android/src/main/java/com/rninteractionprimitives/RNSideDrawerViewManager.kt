@@ -157,17 +157,17 @@ internal class RNSideDrawerViewManager :
         view.side = if (value == "end") RNSideDrawerView.Side.End else RNSideDrawerView.Side.Start
     }
 
-    @ReactProp(name = "springDamping", defaultDouble = 43.982297150257104)
+    @ReactProp(name = "springDamping", defaultDouble = DEFAULT_SIDE_DRAWER_SPRING_DAMPING)
     override fun setSpringDamping(view: RNSideDrawerView, value: Double) {
         view.springDamping = value
     }
 
-    @ReactProp(name = "springMass", defaultDouble = 1.0)
+    @ReactProp(name = "springMass", defaultDouble = DEFAULT_SIDE_DRAWER_SPRING_MASS)
     override fun setSpringMass(view: RNSideDrawerView, value: Double) {
         view.springMass = value
     }
 
-    @ReactProp(name = "springStiffness", defaultDouble = 483.61061565337855)
+    @ReactProp(name = "springStiffness", defaultDouble = DEFAULT_SIDE_DRAWER_SPRING_STIFFNESS)
     override fun setSpringStiffness(view: RNSideDrawerView, value: Double) {
         view.springStiffness = value
     }

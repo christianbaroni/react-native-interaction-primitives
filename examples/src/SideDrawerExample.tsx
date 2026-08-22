@@ -34,9 +34,9 @@ type NumericParameter = Readonly<{
 type KeyedParameter<Key extends string> = NumericParameter & Readonly<{ key: Key }>;
 
 const DEFAULT_SPRING: SpringSettings = {
-  mass: 1,
-  stiffness: (7 * Math.PI) ** 2,
-  damping: 14 * Math.PI,
+  mass: 0.8,
+  stiffness: 680,
+  damping: 46,
 };
 
 const DEFAULT_RELEASE: ReleaseSettings = {
