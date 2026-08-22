@@ -9,6 +9,8 @@ import android.view.View
 import android.view.ViewConfiguration
 import android.view.ViewGroup
 import android.widget.OverScroller
+import androidx.activity.OnBackPressedCallback
+import androidx.activity.OnBackPressedDispatcherOwner
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.ReadableArray
 import com.facebook.react.bridge.WritableMap
@@ -46,11 +48,20 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
     private val touchSlop = viewConfiguration.scaledTouchSlop
     private val maximumFlingVelocity = viewConfiguration.scaledMaximumFlingVelocity
     private val nestedScrollCoordinator = RNNestedScrollCoordinator(this)
+    private val closeOnBackCallback = object : OnBackPressedCallback(false) {
+        override fun handleOnBackPressed() {
+            close(true)
+        }
+    }
 
     private var panelView: RNSideDrawerPanelView? = null
     private var contentView: RNSideDrawerContentView? = null
 
     private var phase = Phase.Closed
+        set(value) {
+            field = value
+            closeOnBackCallback.isEnabled = value != Phase.Closed
+        }
     private var settlingSource = SettlingSource.None
     private var open = false
     private var targetOpen = false
@@ -267,6 +278,12 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
 
     // Lifecycle and touch dispatch
 
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        val owner = reactContext.currentActivity as? OnBackPressedDispatcherOwner ?: return
+        owner.onBackPressedDispatcher.addCallback(owner, closeOnBackCallback)
+    }
+
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         val measuredWidth = MeasureSpec.getSize(widthMeasureSpec)
         val measuredHeight = MeasureSpec.getSize(heightMeasureSpec)
@@ -476,6 +493,7 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
     }
 
     override fun onDetachedFromWindow() {
+        closeOnBackCallback.remove()
         if (phase == Phase.Settling) synchronizeTransition()
         stopTransitionAnimation()
         when (phase) {
