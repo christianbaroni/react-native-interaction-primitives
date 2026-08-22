@@ -1748,7 +1748,7 @@ PODS:
     - React-RCTFBReactNativeSpec
     - ReactCommon/turbomodule/core
     - SocketRocket
-  - react-native-safe-area-context (5.9.0):
+  - react-native-safe-area-context (5.5.2):
     - React-Core
   - React-NativeModulesApple (0.81.6):
     - boost
@@ -2255,7 +2255,7 @@ PODS:
     - React-perflogger (= 0.81.6)
     - React-utils (= 0.81.6)
     - SocketRocket
-  - RNPagerDrawer (0.1.0):
+  - RNInteractionPrimitives (0.1.0):
     - boost
     - DoubleConversion
     - fast_float
@@ -2359,7 +2359,7 @@ DEPENDENCIES:
   - ReactAppDependencyProvider (from `build/generated/ios`)
   - ReactCodegen (from `build/generated/ios`)
   - ReactCommon/turbomodule/core (from `../node_modules/react-native/ReactCommon`)
-  - RNPagerDrawer (from `../node_modules/react-native-pager-drawer`)
+  - RNInteractionPrimitives (from `../node_modules/react-native-interaction-primitives`)
   - SocketRocket (~> 0.7.1)
   - Yoga (from `../node_modules/react-native/ReactCommon/yoga`)
 
@@ -2511,8 +2511,8 @@ EXTERNAL SOURCES:
     :path: build/generated/ios
   ReactCommon:
     :path: "../node_modules/react-native/ReactCommon"
-  RNPagerDrawer:
-    :path: "../node_modules/react-native-pager-drawer"
+  RNInteractionPrimitives:
+    :path: "../node_modules/react-native-interaction-primitives"
   Yoga:
     :path: "../node_modules/react-native/ReactCommon/yoga"
 
@@ -2557,7 +2557,7 @@ SPEC CHECKSUMS:
   React-logger: 6aa0606d9b8746a0df076bf77cc9940a6405452b
   React-Mapbuffer: 8f8bba0802f49d7926602c5c276f2a2083a5ac55
   React-microtasksnativemodule: 1e4d3178ba5d5000b351b902c603fb0c9d60649e
-  react-native-safe-area-context: 2a9f3c3a5106cc0fffc0ca29691a111e48f41553
+  react-native-safe-area-context: 0f7bf11598f9a61b7ceac8dc3f59ef98697e99e1
   React-NativeModulesApple: 183f9bd5b20a51a8b016e90be78ed6c1538da4a7
   React-oscompat: d5e3366fbd6c7150e17c1bda85eab583a6fa9fce
   React-perflogger: 2e4ca29b2bc69c80ef5133de127f5a3c2357c583
@@ -2588,7 +2588,7 @@ SPEC CHECKSUMS:
   ReactAppDependencyProvider: 50d5506ddd091d4ed24b88b661ce9a0e17347357
   ReactCodegen: b4ff5f79e481567c6f14115f8314399b64e70268
   ReactCommon: 8fafefb37d562f9e4bbbc9081ca4501f178a97ec
-  RNPagerDrawer: 58832a8acccde1a66ccd738155c5e0c8ad26cd78
+  RNInteractionPrimitives: e998ec992af3f69b4bef4f2d1fad6c1e988fca70
   SocketRocket: d4aabe649be1e368d1318fdf28a022d714d65748
   Yoga: 3196a843cc5f4bc433f1a41cf17cdf804a01a529
 

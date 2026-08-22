@@ -1,4 +1,4 @@
-package com.pagerdrawer.paper
+package com.interactionprimitives.paper
 
 import android.app.Application
 import com.facebook.react.PackageList

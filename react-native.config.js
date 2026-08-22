@@ -3,8 +3,8 @@ module.exports = {
     platforms: {
       ios: {},
       android: {
-        packageImportPath: 'import com.rnpagerdrawer.RNPagerPackage;',
-        packageInstance: 'new RNPagerPackage()',
+        packageImportPath: 'import com.rninteractionprimitives.RNInteractionPrimitivesPackage;',
+        packageInstance: 'new RNInteractionPrimitivesPackage()',
       },
     },
   },

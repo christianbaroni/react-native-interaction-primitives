@@ -77,9 +77,9 @@ android {
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdk rootProject.ext.compileSdkVersion
 
-    namespace "com.pagerdrawer.paper"
+    namespace "com.interactionprimitives.paper"
     defaultConfig {
-        applicationId "com.pagerdrawer.paper"
+        applicationId "com.interactionprimitives.paper"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1

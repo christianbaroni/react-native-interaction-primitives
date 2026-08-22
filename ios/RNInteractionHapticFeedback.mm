@@ -1,15 +1,15 @@
-#import "RNPagerDrawerHapticFeedback.h"
+#import "RNInteractionHapticFeedback.h"
 
 #import <UIKit/UIImpactFeedbackGenerator.h>
 #import <UIKit/UINotificationFeedbackGenerator.h>
 #import <UIKit/UISelectionFeedbackGenerator.h>
 
-@interface RNPagerDrawerHapticFeedback ()
+@interface RNInteractionHapticFeedback ()
 - (void)clearGenerator;
 - (nullable UIFeedbackGenerator *)generator;
 @end
 
-@implementation RNPagerDrawerHapticFeedback {
+@implementation RNInteractionHapticFeedback {
   __weak UIView *_view;
   UIFeedbackGenerator *_generator;
 }

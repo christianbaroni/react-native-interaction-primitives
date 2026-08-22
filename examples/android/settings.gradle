@@ -11,6 +11,6 @@ extensions.configure(com.facebook.react.ReactSettingsExtension){ ex ->
     "config",
   ])
 }
-rootProject.name = 'PagerDrawerExample'
+rootProject.name = 'InteractionPrimitivesExample'
 include ':app'
 includeBuild('../node_modules/@react-native/gradle-plugin')

@@ -6,7 +6,7 @@
 #import "RNSideDrawerMotion.h"
 #import "RNSideDrawerPanelView.h"
 #import "RNSideDrawerSlots.h"
-#import "RNPagerDrawerHapticFeedback.h"
+#import "RNInteractionHapticFeedback.h"
 
 #import <React/UIView+React.h>
 #import <QuartzCore/QuartzCore.h>
@@ -115,7 +115,7 @@ typedef NS_ENUM(NSInteger, RNSideDrawerSettlingSource) {
   CGFloat _laidOutDrawerWidth;
   CGFloat _reveal;
 
-  RNPagerDrawerHapticFeedback *_hapticFeedback;
+  RNInteractionHapticFeedback *_hapticFeedback;
   BOOL _gestureOriginOpen;
   BOOL _gestureHapticTriggered;
   BOOL _suppressCurrentDragRelease;
@@ -519,7 +519,7 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
     return;
   }
   if (_hapticFeedback == nil) {
-    _hapticFeedback = [[RNPagerDrawerHapticFeedback alloc] initWithView:self];
+    _hapticFeedback = [[RNInteractionHapticFeedback alloc] initWithView:self];
   }
   _hapticFeedback.type = gestureReleaseHaptic;
   if (_phase == RNSideDrawerPhaseDragging) [_hapticFeedback prepare];

@@ -3,8 +3,8 @@
   "compilerOptions": {
     "esModuleInterop": true,
     "paths": {
-      "react-native-pager-drawer": ["../src/index"],
-      "react-native-pager-drawer/reanimated": ["../src/reanimated"],
+      "react-native-interaction-primitives": ["../src/index"],
+      "react-native-interaction-primitives/reanimated": ["../src/reanimated"],
       "react-native-reanimated": ["./node_modules/react-native-reanimated"]
     },
     "types": ["jest"]

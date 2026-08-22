@@ -1,5 +1,5 @@
 {
-  "name": "pager-drawer-example",
+  "name": "interaction-primitives-example",
   "version": "0.0.1",
   "packageManager": "yarn@4.13.0",
   "private": true,
@@ -13,7 +13,7 @@
   "dependencies": {
     "react": "19.2.3",
     "react-native": "0.84.1",
-    "react-native-pager-drawer": "portal:..",
+    "react-native-interaction-primitives": "portal:..",
     "react-native-safe-area-context": "^5.5.2"
   },
   "devDependencies": {

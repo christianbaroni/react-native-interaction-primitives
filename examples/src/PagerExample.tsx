@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Pager, type PagerRef } from 'react-native-pager-drawer';
+import { Pager, type PagerRef } from 'react-native-interaction-primitives';
 
 const PAGES = [
   { color: '#C9E7FF', eyebrow: 'Native gesture', title: 'Interrupt any settle' },
@@ -25,7 +25,7 @@ export function PagerExample({ navigation }: { navigation: React.ReactNode }): R
     <View style={styles.root}>
       <View style={[styles.navigation, { paddingTop: insets.top + 14 }]}>{navigation}</View>
       <View style={styles.header}>
-        <Text style={styles.kicker}>REACT NATIVE PAGER DRAWER</Text>
+        <Text style={styles.kicker}>REACT NATIVE INTERACTION PRIMITIVES</Text>
         <Text style={styles.heading}>Native pager</Text>
         <Text style={styles.detail}>Drag, fling, then grab the page again while it is still moving.</Text>
       </View>

@@ -1,4 +1,4 @@
-package com.rnpagerdrawer
+package com.rninteractionprimitives
 
 import com.facebook.react.bridge.WritableMap
 import com.facebook.react.uimanager.events.Event

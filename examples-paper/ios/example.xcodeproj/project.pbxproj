@@ -413,8 +413,8 @@
 					"-ObjC",
 					"-lc++",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.pagerdrawer.paper;
-				"PRODUCT_BUNDLE_IDENTIFIER[sdk=iphoneos*]" = com.pagerdrawer.paper;
+				PRODUCT_BUNDLE_IDENTIFIER = com.interactionprimitives.paper;
+				"PRODUCT_BUNDLE_IDENTIFIER[sdk=iphoneos*]" = com.interactionprimitives.paper;
 				PRODUCT_NAME = example;
 				SWIFT_OBJC_BRIDGING_HEADER = "example-Bridging-Header.h";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
@@ -443,8 +443,8 @@
 					"-ObjC",
 					"-lc++",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.pagerdrawer.paper;
-				"PRODUCT_BUNDLE_IDENTIFIER[sdk=iphoneos*]" = com.pagerdrawer.paper;
+				PRODUCT_BUNDLE_IDENTIFIER = com.interactionprimitives.paper;
+				"PRODUCT_BUNDLE_IDENTIFIER[sdk=iphoneos*]" = com.interactionprimitives.paper;
 				PRODUCT_NAME = example;
 				SWIFT_OBJC_BRIDGING_HEADER = "example-Bridging-Header.h";
 				SWIFT_VERSION = 5.0;

@@ -10,10 +10,10 @@
 #ifdef RCT_NEW_ARCH_ENABLED
 #import <React/RCTConversions.h>
 #import <React/RCTViewComponentView.h>
-#import <react/renderer/components/RNPagerDrawerSpec/ComponentDescriptors.h>
-#import <react/renderer/components/RNPagerDrawerSpec/EventEmitters.h>
-#import <react/renderer/components/RNPagerDrawerSpec/Props.h>
-#import <react/renderer/components/RNPagerDrawerSpec/RCTComponentViewHelpers.h>
+#import <react/renderer/components/RNInteractionPrimitivesSpec/ComponentDescriptors.h>
+#import <react/renderer/components/RNInteractionPrimitivesSpec/EventEmitters.h>
+#import <react/renderer/components/RNInteractionPrimitivesSpec/Props.h>
+#import <react/renderer/components/RNInteractionPrimitivesSpec/RCTComponentViewHelpers.h>
 #endif
 
 #ifdef RCT_NEW_ARCH_ENABLED

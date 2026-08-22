@@ -3,7 +3,7 @@
   "compilerOptions": {
     "jsx": "react-jsx",
     "paths": {
-      "react-native-pager-drawer": ["../src/index"]
+      "react-native-interaction-primitives": ["../src/index"]
     },
     "types": ["react-native"]
   },

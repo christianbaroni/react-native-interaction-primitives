@@ -10,7 +10,7 @@ def safeExtGet(prop, fallback) {
 apply plugin: 'com.facebook.react'
 
 android {
-    namespace "com.rnpagerdrawer"
+    namespace "com.rninteractionprimitives"
     compileSdkVersion safeExtGet('compileSdkVersion', 35)
 
     defaultConfig {

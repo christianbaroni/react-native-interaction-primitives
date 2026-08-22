@@ -1854,7 +1854,7 @@ PODS:
     - React-utils (= 0.84.1)
     - ReactNativeDependencies
   - ReactNativeDependencies (0.84.1)
-  - RNPagerDrawer (0.1.0):
+  - RNInteractionPrimitives (0.1.0):
     - hermes-engine
     - RCTRequired
     - RCTTypeSafety
@@ -1953,7 +1953,7 @@ DEPENDENCIES:
   - ReactCodegen (from `build/generated/ios/ReactCodegen`)
   - ReactCommon/turbomodule/core (from `../node_modules/react-native/ReactCommon`)
   - ReactNativeDependencies (from `../node_modules/react-native/third-party-podspecs/ReactNativeDependencies.podspec`)
-  - RNPagerDrawer (from `../node_modules/react-native-pager-drawer`)
+  - RNInteractionPrimitives (from `../node_modules/react-native-interaction-primitives`)
   - Yoga (from `../node_modules/react-native/ReactCommon/yoga`)
 
 EXTERNAL SOURCES:
@@ -2104,8 +2104,8 @@ EXTERNAL SOURCES:
     :path: "../node_modules/react-native/ReactCommon"
   ReactNativeDependencies:
     :podspec: "../node_modules/react-native/third-party-podspecs/ReactNativeDependencies.podspec"
-  RNPagerDrawer:
-    :path: "../node_modules/react-native-pager-drawer"
+  RNInteractionPrimitives:
+    :path: "../node_modules/react-native-interaction-primitives"
   Yoga:
     :path: "../node_modules/react-native/ReactCommon/yoga"
 
@@ -2183,7 +2183,7 @@ SPEC CHECKSUMS:
   ReactCodegen: 797de5178718324c6eba3327b07f9a423fbd5787
   ReactCommon: 07572bf9e687c8a52fbe4a3641e9e3a1a477c78e
   ReactNativeDependencies: 7eb9e1bf5fc9bd350bfaa21e9d6b976b97feb17b
-  RNPagerDrawer: 71f456db10164e2edfbea0d287a723d1b3873089
+  RNInteractionPrimitives: 73ce5f5ed9d662af9aab6b2eb69f7a8caedd9ae8
   Yoga: c0b3f2c7e8d3e327e450223a2414ca3fa296b9a2
 
 PODFILE CHECKSUM: a5de45e2350a9515567a6e18ca8ceea718b48523

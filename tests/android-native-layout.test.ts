@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-const androidSource = resolve(process.cwd(), 'android/src/main/java/com/rnpagerdrawer');
+const androidSource = resolve(process.cwd(), 'android/src/main/java/com/rninteractionprimitives');
 
 function source(filename: string): string {
   return readFileSync(resolve(androidSource, filename), 'utf8');

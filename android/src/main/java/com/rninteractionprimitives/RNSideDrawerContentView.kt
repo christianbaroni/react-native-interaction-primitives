@@ -1,4 +1,4 @@
-package com.rnpagerdrawer
+package com.rninteractionprimitives
 
 import android.content.Context
 import android.graphics.Canvas

@@ -1,4 +1,4 @@
-package com.rnpagerdrawer
+package com.rninteractionprimitives
 
 import com.facebook.react.module.annotations.ReactModule
 import com.facebook.react.uimanager.ThemedReactContext

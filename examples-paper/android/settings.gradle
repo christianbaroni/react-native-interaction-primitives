@@ -6,6 +6,6 @@ def reactNativeCli = new File(appRoot, "node_modules/@react-native-community/cli
 extensions.configure(com.facebook.react.ReactSettingsExtension) { ex ->
   ex.autolinkLibrariesFromCommand([nodeBinary, reactNativeCli, "config"], appRoot)
 }
-rootProject.name = 'PagerDrawerPaperExample'
+rootProject.name = 'InteractionPrimitivesPaperExample'
 include ':app'
 includeBuild('../node_modules/@react-native/gradle-plugin')

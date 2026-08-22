@@ -1,8 +1,8 @@
 {
-  "name": "react-native-pager-drawer",
+  "name": "react-native-interaction-primitives",
   "version": "0.1.0",
   "packageManager": "yarn@4.13.0",
-  "description": "Native, interruptible pager and underlay side drawer components for React Native",
+  "description": "Native interaction primitives for React Native",
   "main": "lib/commonjs/index",
   "module": "lib/module/index",
   "types": "lib/typescript/index.d.ts",
@@ -33,7 +33,7 @@
     "/react-native.config.js",
     "/README.md",
     "/LICENSE",
-    "/RNPagerDrawer.podspec",
+    "/RNInteractionPrimitives.podspec",
     "!/lib/typescript/example",
     "!/ios/build",
     "!/android/build",
@@ -65,18 +65,20 @@
     "react-native",
     "ios",
     "android",
+    "interaction",
+    "primitives",
     "pager",
     "drawer",
     "gesture",
     "animation"
   ],
-  "repository": "https://github.com/christianbaroni/react-native-pager-drawer",
+  "repository": "https://github.com/christianbaroni/react-native-interaction-primitives",
   "author": "Christian Baroni <7061887+christianbaroni@users.noreply.github.com> (https://github.com/christianbaroni)",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/christianbaroni/react-native-pager-drawer/issues"
+    "url": "https://github.com/christianbaroni/react-native-interaction-primitives/issues"
   },
-  "homepage": "https://github.com/christianbaroni/react-native-pager-drawer#readme",
+  "homepage": "https://github.com/christianbaroni/react-native-interaction-primitives#readme",
   "engines": {
     "node": ">=20.19.0"
   },
@@ -126,7 +128,7 @@
     ]
   },
   "codegenConfig": {
-    "name": "RNPagerDrawerSpec",
+    "name": "RNInteractionPrimitivesSpec",
     "type": "all",
     "jsSrcsDir": "src",
     "ios": {
@@ -139,7 +141,7 @@
       }
     },
     "android": {
-      "javaPackageName": "com.rnpagerdrawer"
+      "javaPackageName": "com.rninteractionprimitives"
     }
   }
 }

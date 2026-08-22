@@ -1,4 +1,4 @@
-package com.rnpagerdrawer
+package com.rninteractionprimitives
 
 import kotlin.math.abs
 import kotlin.math.atan2

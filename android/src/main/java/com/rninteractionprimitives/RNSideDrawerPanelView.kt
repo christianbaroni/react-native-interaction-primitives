@@ -1,4 +1,4 @@
-package com.rnpagerdrawer
+package com.rninteractionprimitives
 
 import android.widget.FrameLayout
 import com.facebook.react.uimanager.ThemedReactContext

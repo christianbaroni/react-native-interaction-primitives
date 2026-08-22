@@ -1,4 +1,4 @@
-package com.pagerdrawer.example
+package com.interactionprimitives.example
 
 import android.content.Context
 import com.facebook.react.defaults.DefaultNewArchitectureEntryPoint

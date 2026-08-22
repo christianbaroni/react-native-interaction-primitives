@@ -1,13 +1,13 @@
-# react-native-pager-drawer
+# react-native-interaction-primitives
 
-Native, interruptible paging and underlay drawers for React Native. Gestures, release projection, and settle animations remain on the platform UI thread; JavaScript and Reanimated can observe motion without driving it.
+Native interaction primitives for React Native. The package currently provides an interruptible pager and underlay side drawer. Gestures, release projection, and animations remain on the platform UI thread; JavaScript and Reanimated can observe motion without driving it.
 
 The package supports React Native 0.81 and later. React Native 0.81 apps may use either Paper or Fabric. React Native 0.82 and later use Fabric.
 
 ## Install
 
 ```sh
-yarn add react-native-pager-drawer
+yarn add react-native-interaction-primitives
 cd ios && pod install
 ```
 
@@ -18,7 +18,7 @@ cd ios && pod install
 ```tsx
 import * as React from 'react';
 import { Text, View } from 'react-native';
-import { Pager, type PagerRef } from 'react-native-pager-drawer';
+import { Pager, type PagerRef } from 'react-native-interaction-primitives';
 
 export function Deck() {
   const pager = React.useRef<PagerRef>(null);
@@ -85,7 +85,7 @@ Custom React Native Gesture Handler relationships remain explicit. Compose the p
 ```tsx
 import * as React from 'react';
 import { Text, View } from 'react-native';
-import { SideDrawer, type SideDrawerRef } from 'react-native-pager-drawer';
+import { SideDrawer, type SideDrawerRef } from 'react-native-interaction-primitives';
 
 export function Shell() {
   const drawer = React.useRef<SideDrawerRef>(null);
@@ -224,12 +224,12 @@ The motion description is validated and flattened once per `motion` object, then
 
 ## Reanimated observation
 
-Reanimated is optional and lives behind the `react-native-pager-drawer/reanimated` entry point. The hooks update shared values from direct native progress events. They do not schedule or advance native animation.
+Reanimated is optional and lives behind the `react-native-interaction-primitives/reanimated` entry point. The hooks update shared values from direct native progress events. They do not schedule or advance native animation.
 
 ```tsx
 import Animated from 'react-native-reanimated';
-import { Pager } from 'react-native-pager-drawer';
-import { usePager } from 'react-native-pager-drawer/reanimated';
+import { Pager } from 'react-native-interaction-primitives';
+import { usePager } from 'react-native-interaction-primitives/reanimated';
 
 const AnimatedPager = Animated.createAnimatedComponent(Pager);
 
@@ -250,8 +250,8 @@ The controller exposes `offset`, `page`, `phase`, and `position` shared values, 
 
 ```tsx
 import Animated from 'react-native-reanimated';
-import { SideDrawer } from 'react-native-pager-drawer';
-import { useSideDrawer } from 'react-native-pager-drawer/reanimated';
+import { SideDrawer } from 'react-native-interaction-primitives';
+import { useSideDrawer } from 'react-native-interaction-primitives/reanimated';
 
 const AnimatedSideDrawer = Animated.createAnimatedComponent(SideDrawer);
 

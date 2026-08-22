@@ -5,7 +5,7 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
-@interface RNPagerDrawerHapticFeedback : NSObject
+@interface RNInteractionHapticFeedback : NSObject
 @property (nonatomic, copy) NSString *type;
 
 - (instancetype)initWithView:(UIView *)view NS_DESIGNATED_INITIALIZER;

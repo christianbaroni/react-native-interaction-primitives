@@ -1,8 +1,8 @@
 {
   "compilerOptions": {
     "paths": {
-      "react-native-pager-drawer": ["./src/index"],
-      "react-native-pager-drawer/reanimated": ["./src/reanimated"]
+      "react-native-interaction-primitives": ["./src/index"],
+      "react-native-interaction-primitives/reanimated": ["./src/reanimated"]
     },
     "allowUnreachableCode": false,
     "allowUnusedLabels": false,

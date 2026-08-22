@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { SideDrawer, type SideDrawerInteraction, type SideDrawerMotion, type SideDrawerRef } from 'react-native-pager-drawer';
+import { SideDrawer, type SideDrawerInteraction, type SideDrawerMotion, type SideDrawerRef } from 'react-native-interaction-primitives';
 
 const MENU_ITEMS = ['Library', 'Projects', 'Scheduled', 'Remote', 'Settings'] as const;
 

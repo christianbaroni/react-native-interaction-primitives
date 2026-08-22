@@ -1,4 +1,4 @@
-package com.rnpagerdrawer
+package com.rninteractionprimitives
 
 import android.os.Build
 import android.view.HapticFeedbackConstants

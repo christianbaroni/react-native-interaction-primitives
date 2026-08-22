@@ -3691,6 +3691,28 @@ __metadata:
   languageName: node
   linkType: hard
 
+"interaction-primitives-paper-example@workspace:.":
+  version: 0.0.0-use.local
+  resolution: "interaction-primitives-paper-example@workspace:."
+  dependencies:
+    "@babel/core": "npm:^7.25.2"
+    "@babel/preset-env": "npm:^7.25.3"
+    "@babel/runtime": "npm:^7.25.0"
+    "@react-native-community/cli": "npm:20.0.0"
+    "@react-native-community/cli-platform-android": "npm:20.0.0"
+    "@react-native-community/cli-platform-ios": "npm:20.0.0"
+    "@react-native/babel-preset": "npm:0.81.6"
+    "@react-native/metro-config": "npm:0.81.6"
+    "@react-native/typescript-config": "npm:0.81.6"
+    "@types/react": "npm:^19.1.4"
+    react: "npm:19.1.4"
+    react-native: "npm:0.81.6"
+    react-native-interaction-primitives: "portal:.."
+    react-native-safe-area-context: "npm:5.5.2"
+    typescript: "npm:^5.8.3"
+  languageName: unknown
+  linkType: soft
+
 "invariant@npm:^2.2.4":
   version: 2.2.4
   resolution: "invariant@npm:2.2.4"
@@ -4786,28 +4808,6 @@ __metadata:
   languageName: node
   linkType: hard
 
-"pager-drawer-paper-example@workspace:.":
-  version: 0.0.0-use.local
-  resolution: "pager-drawer-paper-example@workspace:."
-  dependencies:
-    "@babel/core": "npm:^7.25.2"
-    "@babel/preset-env": "npm:^7.25.3"
-    "@babel/runtime": "npm:^7.25.0"
-    "@react-native-community/cli": "npm:20.0.0"
-    "@react-native-community/cli-platform-android": "npm:20.0.0"
-    "@react-native-community/cli-platform-ios": "npm:20.0.0"
-    "@react-native/babel-preset": "npm:0.81.6"
-    "@react-native/metro-config": "npm:0.81.6"
-    "@react-native/typescript-config": "npm:0.81.6"
-    "@types/react": "npm:^19.1.4"
-    react: "npm:19.1.4"
-    react-native: "npm:0.81.6"
-    react-native-pager-drawer: "portal:.."
-    react-native-safe-area-context: "npm:5.5.2"
-    typescript: "npm:^5.8.3"
-  languageName: unknown
-  linkType: soft
-
 "parent-module@npm:^1.0.0":
   version: 1.0.1
   resolution: "parent-module@npm:1.0.1"
@@ -4990,9 +4990,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"react-native-pager-drawer@portal:..::locator=pager-drawer-paper-example%40workspace%3A.":
+"react-native-interaction-primitives@portal:..::locator=interaction-primitives-paper-example%40workspace%3A.":
   version: 0.0.0-use.local
-  resolution: "react-native-pager-drawer@portal:..::locator=pager-drawer-paper-example%40workspace%3A."
+  resolution: "react-native-interaction-primitives@portal:..::locator=interaction-primitives-paper-example%40workspace%3A."
   peerDependencies:
     react: ">=18.2.0"
     react-native: ">=0.81.0"

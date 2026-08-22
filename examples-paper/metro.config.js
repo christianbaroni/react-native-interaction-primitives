@@ -10,7 +10,7 @@ const config = {
     extraNodeModules: {
       react: path.resolve(appNodeModules, 'react'),
       'react-native': path.resolve(appNodeModules, 'react-native'),
-      'react-native-pager-drawer': packageRoot,
+      'react-native-interaction-primitives': packageRoot,
     },
     nodeModulesPaths: [appNodeModules],
     unstable_enableSymlinks: true,

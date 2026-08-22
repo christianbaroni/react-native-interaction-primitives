@@ -1,4 +1,4 @@
-package com.rnpagerdrawer
+package com.rninteractionprimitives
 
 import android.view.View
 import com.facebook.react.bridge.ReadableArray
