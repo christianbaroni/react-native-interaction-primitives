@@ -33,7 +33,10 @@ typedef NS_ENUM(NSInteger, RNPagerSettlingSource) {
 - (CGFloat)scrollPixelTolerance;
 - (BOOL)shouldDeferSettlingFinish;
 - (void)finishSettlingAtPageIfMotionIsAtRest:(NSInteger)page;
+- (NSDictionary *)stateForOffset:(CGFloat)offset;
+- (void)publishPageScrollForOffset:(CGFloat)offset;
 - (void)publishState;
+- (void)updatePageAccessibility;
 @end
 
 @implementation RNPagerView {
@@ -55,7 +58,9 @@ typedef NS_ENUM(NSInteger, RNPagerSettlingSource) {
   CFTimeInterval _lastScrollSampleTime;
   CGFloat _scrollVelocity;
   CGFloat _interruptedSettleVelocity;
+  CGFloat _laidOutPageExtent;
   BOOL _hasLaidOutPages;
+  BOOL _pageScrollSnapshotPending;
 }
 
 static const CGFloat RNPagerMillisecondsPerSecond = 1000.0;
@@ -138,8 +143,44 @@ static NSInteger RNPagerResolveTargetPage(
 - (void)layoutSubviews
 {
   [super layoutSubviews];
+
+  CGFloat pageExtent = [self pageExtent];
+  BOOL pageExtentChanged = _laidOutPageExtent > 0 && pageExtent != _laidOutPageExtent;
+  BOOL resizeDuringSettling = pageExtentChanged && _phase == RNPagerPhaseSettling;
+  NSInteger targetPage = _targetPage;
+  RNPagerSettlingSource settlingSource = _settlingSource;
+  CGFloat settleVelocityInPagesPerSecond = resizeDuringSettling
+      ? _scrollVelocity / _laidOutPageExtent
+      : 0;
+  if (resizeDuringSettling) {
+    CGFloat visibleOffset = [self presentationOffset];
+    [self transitionToPhase:RNPagerPhaseIdle];
+    [self stopSettlingFinishWatcher];
+    if (_nativeScrollAnimationActive) [self stopNativeScrollAnimationAtPresentationOffset];
+    [_scrollView stopPagerScrollMotion];
+    [self setCurrentOffset:visibleOffset allowingBounce:YES];
+    _targetPage = targetPage;
+    _settlingSource = settlingSource;
+    [self transitionToPhase:RNPagerPhaseSettling];
+  }
+
   [self layoutPagesPreservingPosition:YES];
   _hasLaidOutPages = _pages.count > 0;
+  if (resizeDuringSettling && _phase == RNPagerPhaseSettling) {
+    _scrollVelocity = settleVelocityInPagesPerSecond * _laidOutPageExtent;
+    _lastScrollSampleOffset = [self currentOffset];
+    _lastScrollSampleTime = CACurrentMediaTime();
+    _hasScrollVelocitySample = YES;
+    if (_settlingSource == RNPagerSettlingSourceRelease) {
+      [self startNativeReleaseSnapAnimationToPage:_targetPage];
+    } else {
+      [self startNativeScrollAnimationToPage:_targetPage];
+    }
+  }
+  if (_pageScrollEventsEnabled && _hasLaidOutPages) {
+    _pageScrollSnapshotPending = NO;
+    [self publishPageScrollForOffset:[self presentationOffset]];
+  }
 }
 
 - (void)dealloc
@@ -160,6 +201,7 @@ static NSInteger RNPagerResolveTargetPage(
   _initialPage = MAX(0, initialPage);
   if (!_hasLaidOutPages) {
     _selectedPage = RNPagerClampPage(_initialPage, _pages.count);
+    [self updatePageAccessibility];
   }
 }
 
@@ -173,6 +215,19 @@ static NSInteger RNPagerResolveTargetPage(
 {
   _pageSpacing = MAX(0, pageSpacing);
   [self setNeedsLayout];
+}
+
+- (void)setPageScrollEventsEnabled:(BOOL)pageScrollEventsEnabled
+{
+  if (_pageScrollEventsEnabled == pageScrollEventsEnabled) return;
+  _pageScrollEventsEnabled = pageScrollEventsEnabled;
+  _pageScrollSnapshotPending = pageScrollEventsEnabled;
+}
+
+- (void)didSetProps:(NSArray<NSString *> *)changedProps
+{
+  (void)changedProps;
+  [self flushPendingPageScrollSnapshot];
 }
 
 - (void)setOrientation:(RNPagerOrientation)orientation
@@ -210,6 +265,7 @@ static NSInteger RNPagerResolveTargetPage(
   if (_phase == RNPagerPhaseEmpty) {
     [self transitionToPhase:RNPagerPhaseIdle];
   }
+  [self updatePageAccessibility];
   [self layoutPagesPreservingPosition:NO];
   [self publishState];
 }
@@ -253,6 +309,7 @@ static NSInteger RNPagerResolveTargetPage(
     _hasLaidOutPages = NO;
     [self transitionToPhase:RNPagerPhaseEmpty];
   }
+  [self updatePageAccessibility];
   [self layoutPagesPreservingPosition:NO];
   [self publishState];
 }
@@ -282,10 +339,14 @@ static NSInteger RNPagerResolveTargetPage(
 
 - (NSDictionary *)state
 {
+  return [self stateForOffset:[self currentOffset]];
+}
+
+- (NSDictionary *)stateForOffset:(CGFloat)offset
+{
   NSInteger pageCount = _pages.count;
-  CGFloat extent = [self pageExtent];
-  CGFloat offset = [self currentOffset];
-  CGFloat position = extent > 0 ? offset / extent : 0;
+  CGFloat pageExtent = [self pageExtent];
+  CGFloat position = pageExtent > 0 ? offset / pageExtent : 0;
   NSInteger page = pageCount > 0 ? RNPagerClampPage((NSInteger)llround(position), pageCount) : 0;
   return @{
     @"anchorOffset" : @(_anchorOffset),
@@ -293,7 +354,7 @@ static NSInteger RNPagerResolveTargetPage(
     @"offset" : @(offset),
     @"page" : @(page),
     @"pageCount" : @(pageCount),
-    @"pageExtent" : @(extent),
+    @"pageExtent" : @(pageExtent),
     @"phase" : [self phaseName],
     @"position" : @(position),
     @"settlingSource" : [self settlingSourceName],
@@ -311,36 +372,45 @@ static NSInteger RNPagerResolveTargetPage(
   [_pages removeAllObjects];
   _hasLaidOutPages = NO;
   [_contentView.subviews makeObjectsPerformSelector:@selector(removeFromSuperview)];
+  self.pageScrollEventsEnabled = NO;
   [self transitionToPhase:RNPagerPhaseEmpty];
 }
 
 - (void)layoutPagesPreservingPosition:(BOOL)preservePosition
 {
-  CGFloat oldExtent = [self pageExtent];
-  CGFloat oldPosition = oldExtent > 0 ? [self currentOffset] / oldExtent : _selectedPage;
+  CGFloat previousPageExtent = _laidOutPageExtent;
+  CGFloat previousPosition = previousPageExtent > 0
+      ? [self currentOffset] / previousPageExtent
+      : _selectedPage;
   CGSize pageSize = [self pageSize];
-  CGFloat extent = [self pageExtentForPageSize:pageSize];
-  _scrollView.frame = [self scrollViewFrameForPageExtent:extent];
+  CGFloat pageExtent = [self pageExtentForPageSize:pageSize];
+  if (previousPageExtent > 0 && pageExtent != previousPageExtent) {
+    CGFloat pageExtentScale = pageExtent / previousPageExtent;
+    _anchorOffset *= pageExtentScale;
+    if (_phase == RNPagerPhaseDragging) _interruptedSettleVelocity *= pageExtentScale;
+  }
+  _laidOutPageExtent = pageExtent;
+  _scrollView.frame = [self scrollViewFrameForPageExtent:pageExtent];
   for (NSUInteger index = 0; index < _pages.count; index += 1) {
     UIView *container = _pages[index];
     CGRect frame;
     if (_orientation == RNPagerOrientationHorizontal) {
-      frame = CGRectMake(_pageSpacing * 0.5 + (CGFloat)index * extent, 0, pageSize.width, pageSize.height);
+      frame = CGRectMake(_pageSpacing * 0.5 + (CGFloat)index * pageExtent, 0, pageSize.width, pageSize.height);
     } else {
-      frame = CGRectMake(0, _pageSpacing * 0.5 + (CGFloat)index * extent, pageSize.width, pageSize.height);
+      frame = CGRectMake(0, _pageSpacing * 0.5 + (CGFloat)index * pageExtent, pageSize.width, pageSize.height);
     }
     container.frame = frame;
   }
-  CGFloat contentLength = _pages.count == 0 ? extent : (CGFloat)_pages.count * extent;
+  CGFloat contentLength = _pages.count == 0 ? pageExtent : (CGFloat)_pages.count * pageExtent;
   if (_orientation == RNPagerOrientationHorizontal) {
     _contentView.frame = CGRectMake(0, 0, MAX(0, contentLength), self.bounds.size.height);
   } else {
     _contentView.frame = CGRectMake(0, 0, self.bounds.size.width, MAX(0, contentLength));
   }
   _scrollView.contentSize = _contentView.bounds.size;
-  CGFloat nextPosition = preservePosition ? oldPosition : _selectedPage;
+  CGFloat nextPosition = preservePosition ? previousPosition : _selectedPage;
   if (!isfinite(nextPosition)) nextPosition = _selectedPage;
-  [self setCurrentOffset:nextPosition * extent allowingBounce:preservePosition];
+  [self setCurrentOffset:nextPosition * pageExtent allowingBounce:preservePosition];
 }
 
 - (CGSize)pageSize
@@ -698,6 +768,7 @@ static NSInteger RNPagerResolveTargetPage(
   _interruptedSettleVelocity = 0;
   _selectedPage = RNPagerClampPage(page, _pages.count);
   [self setCurrentOffset:_selectedPage * [self pageExtent]];
+  [self updatePageAccessibility];
   [self transitionToPhase:(_pages.count == 0 ? RNPagerPhaseEmpty : RNPagerPhaseIdle)];
   [self publishState];
   if (_lastEmittedPage != _selectedPage) {
@@ -707,6 +778,15 @@ static NSInteger RNPagerResolveTargetPage(
     NSDictionary *change = @{ @"page" : @(_selectedPage) };
     if (self.pageChangeHandler != nil) self.pageChangeHandler(change);
     if (self.onPageChange != nil) self.onPageChange(change);
+  }
+}
+
+- (void)updatePageAccessibility
+{
+  for (NSUInteger index = 0; index < _pages.count; index += 1) {
+    BOOL hidden = index != (NSUInteger)_selectedPage;
+    UIView *page = _pages[index];
+    if (page.accessibilityElementsHidden != hidden) page.accessibilityElementsHidden = hidden;
   }
 }
 
@@ -760,9 +840,21 @@ static NSInteger RNPagerResolveTargetPage(
 
 - (void)publishPageScroll
 {
+  [self publishPageScrollForOffset:[self currentOffset]];
+}
+
+- (void)flushPendingPageScrollSnapshot
+{
+  if (!_pageScrollSnapshotPending || !_pageScrollEventsEnabled || !_hasLaidOutPages) return;
+  _pageScrollSnapshotPending = NO;
+  [self publishPageScrollForOffset:[self presentationOffset]];
+}
+
+- (void)publishPageScrollForOffset:(CGFloat)offset
+{
   if (!_pageScrollEventsEnabled) return;
   if (self.pageScrollHandler == nil && self.onPageScroll == nil) return;
-  NSDictionary *payload = [self state];
+  NSDictionary *payload = [self stateForOffset:offset];
   if (self.pageScrollHandler != nil) self.pageScrollHandler(payload);
   if (self.onPageScroll != nil) self.onPageScroll(payload);
 }

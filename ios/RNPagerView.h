@@ -29,6 +29,7 @@ typedef NS_ENUM(NSInteger, RNPagerOrientation) {
 - (void)insertReactSubview:(UIView *)subview atIndex:(NSInteger)atIndex;
 - (void)removeReactSubview:(UIView *)subview;
 - (void)setPage:(NSInteger)page animated:(BOOL)animated;
+- (void)flushPendingPageScrollSnapshot;
 - (void)prepareForRemoval;
 @end
 

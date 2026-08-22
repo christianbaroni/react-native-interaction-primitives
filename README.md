@@ -57,7 +57,7 @@ The target must be an integer within the currently mounted page range. Invalid t
 - `scrollEnabled?: boolean` — enables touch paging; imperative navigation remains available.
 - `onPageChange?: ({ page }) => void` — reports the settled page when a settle completes.
 - `onStateChange?: (state) => void` — reports the native phase transition model.
-- `onPageScroll?: (event) => void` — reports continuous native position. The native implementations skip per-frame event construction when this prop is absent.
+- `onPageScroll?: (event) => void` — reports the current native position when the listener is attached, then continuous position changes. The native implementations skip per-frame event construction when this prop is absent.
 
 `Pager` also accepts React Native `ViewProps`.
 
@@ -71,6 +71,8 @@ The target must be an integer within the currently mounted page range. Invalid t
 - `settling`, with the anchor, target, and `release` or `programmatic` source
 
 `onPageScroll` receives the flat native transport, including `offset`, `position`, `page`, `pageCount`, `pageExtent`, `phase`, and the current anchor and target.
+
+Only the selected page participates in the native accessibility tree. A page becomes accessible when its transition finishes, so VoiceOver and TalkBack do not traverse controls on offscreen pages. Native accessibility scroll actions move to the adjacent page when touch paging is enabled.
 
 ### Pager gesture ownership
 

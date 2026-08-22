@@ -373,6 +373,12 @@ void stopScrollMotion(UIScrollView *scrollView)
   [super setScrollEnabled:_pagerScrollEnabled];
 }
 
+- (void)stopPagerScrollMotion
+{
+  [super setScrollEnabled:NO];
+  [super setScrollEnabled:_pagerScrollEnabled && !_descendantOwnsInteraction];
+}
+
 - (void)willRemoveContentView:(UIView *)view
 {
   if (_touchedPage == view || [_touchedPage isDescendantOfView:view]) {

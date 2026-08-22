@@ -168,6 +168,12 @@ static Event RNPagerStateEvent(NSDictionary *payload)
   _pagerView.frame = self.bounds;
 }
 
+- (void)finalizeUpdates:(RNComponentViewUpdateMask)updateMask
+{
+  [super finalizeUpdates:updateMask];
+  [_pagerView flushPendingPageScrollSnapshot];
+}
+
 - (void)updateProps:(const Props::Shared &)props oldProps:(const Props::Shared &)oldProps
 {
   const auto &oldViewProps = static_cast<const RNPagerViewProps &>(*_props);

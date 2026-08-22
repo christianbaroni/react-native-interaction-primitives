@@ -1,10 +1,13 @@
 package com.rninteractionprimitives
 
+import android.os.Bundle
 import android.view.MotionEvent
 import android.view.VelocityTracker
 import android.view.View
 import android.view.ViewConfiguration
 import android.view.ViewGroup
+import android.view.accessibility.AccessibilityEvent
+import android.view.accessibility.AccessibilityNodeInfo
 import android.widget.OverScroller
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.WritableMap
@@ -54,7 +57,8 @@ internal class RNPagerView(private val reactContext: ThemedReactContext) : ViewG
     private var isDragging = false
     private var lastEmittedPage = Int.MIN_VALUE
     private var lastMainAxisPx = 0f
-    private var lastPageExtentPx = 0f
+    private var laidOutPageExtentPx = 0f
+    private var pageScrollSnapshotPending = false
     private var pausedSettleVelocityPxPerSecond = 0f
     private var phase = Phase.Empty
     private var selectedPage = 0
@@ -66,7 +70,10 @@ internal class RNPagerView(private val reactContext: ThemedReactContext) : ViewG
     var initialPage: Int = 0
         set(value) {
             field = max(0, value)
-            if (!hasLaidOutPages) selectedPage = clampPage(field)
+            if (!hasLaidOutPages) {
+                selectedPage = clampPage(field)
+                updatePageAccessibility()
+            }
         }
 
     var orientation: Orientation = Orientation.Horizontal
@@ -86,7 +93,7 @@ internal class RNPagerView(private val reactContext: ThemedReactContext) : ViewG
             }
 
             field = value
-            lastPageExtentPx = 0f
+            laidOutPageExtentPx = 0f
             requestLayout()
         }
 
@@ -99,6 +106,11 @@ internal class RNPagerView(private val reactContext: ThemedReactContext) : ViewG
     var pageChangeEventsEnabled: Boolean = false
 
     var pageScrollEventsEnabled: Boolean = false
+        set(value) {
+            if (field == value) return
+            field = value
+            pageScrollSnapshotPending = value
+        }
 
     var pageSpacingPx: Float = 0f
         set(value) {
@@ -126,6 +138,7 @@ internal class RNPagerView(private val reactContext: ThemedReactContext) : ViewG
     init {
         clipChildren = false
         clipToPadding = false
+        importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_YES
     }
 
     override fun onDetachedFromWindow() {
@@ -163,33 +176,114 @@ internal class RNPagerView(private val reactContext: ThemedReactContext) : ViewG
     }
 
     override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
-        val oldExtent = lastPageExtentPx
-        val oldPosition = if (oldExtent > 0f) currentOffsetPx() / oldExtent else selectedPage.toFloat()
-        val extent = pageExtentPx()
-        lastPageExtentPx = extent
+        val previousPageExtent = laidOutPageExtentPx
+        val pageExtent = pageExtentPx()
+        val pageExtentChanged = previousPageExtent > 0f && pageExtent != previousPageExtent
+        val resizeDuringSettling = pageExtentChanged && phase == Phase.Settling
+        if (resizeDuringSettling && !settlePausedForTouch) scroller.computeScrollOffset()
+        val previousOffset = if (resizeDuringSettling && !settlePausedForTouch) {
+            currentScrollerOffsetPx()
+        } else {
+            currentOffsetPx()
+        }
+        val previousPosition = if (previousPageExtent > 0f) {
+            previousOffset / previousPageExtent
+        } else {
+            selectedPage.toFloat()
+        }
+        val settleVelocityInPagesPerSecond = when {
+            !resizeDuringSettling -> 0f
+            settlePausedForTouch -> pausedSettleVelocityPxPerSecond / previousPageExtent
+            scroller.isFinished -> 0f
+            else -> currentScrollerVelocityPxPerSecond() / previousPageExtent
+        }
+        if (resizeDuringSettling) scroller.abortAnimation()
+        if (pageExtentChanged) {
+            val pageExtentScale = pageExtent / previousPageExtent
+            anchorOffsetPx *= pageExtentScale
+            if (phase == Phase.Dragging) interruptedSettleVelocityPxPerSecond *= pageExtentScale
+        }
+        laidOutPageExtentPx = pageExtent
 
         pages.forEachIndexed { index, page ->
             val pageLeft: Int
             val pageTop: Int
             if (orientation == Orientation.Horizontal) {
-                pageLeft = (pageInsetPx + index * extent).roundToInt()
+                pageLeft = (pageInsetPx + index * pageExtent).roundToInt()
                 pageTop = 0
             } else {
                 pageLeft = 0
-                pageTop = (pageInsetPx + index * extent).roundToInt()
+                pageTop = (pageInsetPx + index * pageExtent).roundToInt()
             }
             page.layout(pageLeft, pageTop, pageLeft + page.measuredWidth, pageTop + page.measuredHeight)
         }
 
-        val nextPosition = if (oldExtent > 0f && phase != Phase.Empty) oldPosition else selectedPage.toFloat()
-        scrollToOffsetPx(nextPosition * extent)
+        val nextPosition = if (previousPageExtent > 0f && phase != Phase.Empty) {
+            previousPosition
+        } else {
+            selectedPage.toFloat()
+        }
+        scrollToOffsetPx(nextPosition * pageExtent)
         hasLaidOutPages = pages.isNotEmpty()
         if (pages.isEmpty()) {
             transitionToPhase(Phase.Empty)
         } else if (phase == Phase.Empty) {
             transitionToPhase(Phase.Idle)
         }
+        if (resizeDuringSettling && phase == Phase.Settling) {
+            val resizedVelocityPxPerSecond = settleVelocityInPagesPerSecond * pageExtent
+            if (settlePausedForTouch) {
+                pausedSettleVelocityPxPerSecond = resizedVelocityPxPerSecond
+            } else {
+                startSettlingAnimation(animated = true, initialVelocityPxPerSecond = resizedVelocityPxPerSecond)
+            }
+        }
         publishState()
+        if (pageScrollEventsEnabled && hasLaidOutPages) {
+            pageScrollSnapshotPending = false
+            publishPageScroll()
+        }
+    }
+
+    override fun onInitializeAccessibilityEvent(event: AccessibilityEvent) {
+        super.onInitializeAccessibilityEvent(event)
+        event.className = ACCESSIBILITY_CLASS_NAME
+        event.isScrollable = pagerScrollEnabled && pages.size > 1
+        event.itemCount = pages.size
+        event.fromIndex = selectedPage
+        event.toIndex = selectedPage
+    }
+
+    // CollectionInfo.Builder requires API 33; obtain supports the package's API 24 floor.
+    @Suppress("DEPRECATION")
+    override fun onInitializeAccessibilityNodeInfo(info: AccessibilityNodeInfo) {
+        super.onInitializeAccessibilityNodeInfo(info)
+        info.className = ACCESSIBILITY_CLASS_NAME
+        info.collectionInfo = AccessibilityNodeInfo.CollectionInfo.obtain(
+            if (orientation == Orientation.Vertical) pages.size else 1,
+            if (orientation == Orientation.Horizontal) pages.size else 1,
+            false,
+            AccessibilityNodeInfo.CollectionInfo.SELECTION_MODE_NONE,
+        )
+        if (!pagerScrollEnabled || pages.size <= 1) return
+
+        val page = if (phase == Phase.Settling) targetPage else selectedPage
+        if (page > 0) info.addAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_BACKWARD)
+        if (page < pages.lastIndex) info.addAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_FORWARD)
+        info.isScrollable = true
+    }
+
+    override fun performAccessibilityAction(action: Int, arguments: Bundle?): Boolean {
+        if (!pagerScrollEnabled || pages.size <= 1) return super.performAccessibilityAction(action, arguments)
+        val page = if (phase == Phase.Settling) targetPage else selectedPage
+        val target = when (action) {
+            AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD -> page - 1
+            AccessibilityNodeInfo.ACTION_SCROLL_FORWARD -> page + 1
+            else -> return super.performAccessibilityAction(action, arguments)
+        }
+        if (target !in pages.indices) return false
+        setPage(target, animated = true)
+        return true
     }
 
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
@@ -335,6 +429,7 @@ internal class RNPagerView(private val reactContext: ThemedReactContext) : ViewG
         super.addView(page, boundedIndex, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
         if (!hasLaidOutPages) selectedPage = clampPage(initialPage)
         if (phase == Phase.Empty) transitionToPhase(Phase.Idle)
+        updatePageAccessibility()
         requestLayout()
         publishState()
     }
@@ -353,6 +448,7 @@ internal class RNPagerView(private val reactContext: ThemedReactContext) : ViewG
             clearPausedSettle()
             transitionToPhase(Phase.Empty)
         }
+        updatePageAccessibility()
         requestLayout()
         publishState()
     }
@@ -364,6 +460,12 @@ internal class RNPagerView(private val reactContext: ThemedReactContext) : ViewG
         settleToPage(page, SettlingSource.Programmatic, animated)
     }
 
+    fun flushPendingPageScrollSnapshot() {
+        if (!pageScrollSnapshotPending || !pageScrollEventsEnabled || !hasLaidOutPages) return
+        pageScrollSnapshotPending = false
+        publishPageScroll()
+    }
+
     fun prepareForRemoval() {
         cancelTouchInteraction()
         scroller.abortAnimation()
@@ -371,6 +473,7 @@ internal class RNPagerView(private val reactContext: ThemedReactContext) : ViewG
         pages.clear()
         removeAllViews()
         hasLaidOutPages = false
+        pageScrollEventsEnabled = false
         transitionToPhase(Phase.Empty)
     }
 
@@ -495,10 +598,14 @@ internal class RNPagerView(private val reactContext: ThemedReactContext) : ViewG
     private fun finishSettlingAtPage(page: Int) {
         if (phase != Phase.Settling && phase != Phase.Dragging) return
         clearPausedSettle()
-        selectedPage = clampPage(page)
+        val nextPage = clampPage(page)
+        val selectionChanged = nextPage != selectedPage
+        selectedPage = nextPage
         scrollToOffsetPx(offsetForPage(selectedPage))
+        updatePageAccessibility()
         transitionToPhase(if (pages.isEmpty()) Phase.Empty else Phase.Idle)
         publishState()
+        if (selectionChanged) sendAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_SCROLLED)
         if (lastEmittedPage != selectedPage) {
             lastEmittedPage = selectedPage
             if (!pageChangeEventsEnabled) return
@@ -508,10 +615,33 @@ internal class RNPagerView(private val reactContext: ThemedReactContext) : ViewG
         }
     }
 
+    private fun updatePageAccessibility() {
+        pages.forEachIndexed { index, page ->
+            val importance = if (index == selectedPage) {
+                IMPORTANT_FOR_ACCESSIBILITY_AUTO
+            } else {
+                IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+            }
+            if (page.importantForAccessibility != importance) page.importantForAccessibility = importance
+        }
+    }
+
     private fun currentScrollerVelocityPxPerSecond(): Float {
-        val remaining = offsetForPage(targetPage) - currentOffsetPx()
-        if (remaining == 0f) return 0f
-        return scroller.currVelocity * if (remaining > 0f) 1f else -1f
+        val remaining = if (orientation == Orientation.Horizontal) {
+            scroller.finalX - scroller.currX
+        } else {
+            scroller.finalY - scroller.currY
+        }
+        if (remaining == 0) return 0f
+        return scroller.currVelocity * if (remaining > 0) 1f else -1f
+    }
+
+    private fun currentScrollerOffsetPx(): Float {
+        return if (orientation == Orientation.Horizontal) {
+            scroller.currX.toFloat()
+        } else {
+            scroller.currY.toFloat()
+        }
     }
 
     private fun pauseSettleForTouch() {
@@ -530,7 +660,7 @@ internal class RNPagerView(private val reactContext: ThemedReactContext) : ViewG
     private fun resumePausedSettle() {
         if (!settlePausedForTouch || phase != Phase.Settling) return
         clearPausedSettle()
-        startSettlingAnimation(animated = true, releaseVelocityPxPerSecond = 0f)
+        startSettlingAnimation(animated = true, initialVelocityPxPerSecond = 0f)
     }
 
     private fun clearPausedSettle() {
@@ -538,7 +668,7 @@ internal class RNPagerView(private val reactContext: ThemedReactContext) : ViewG
         pausedSettleVelocityPxPerSecond = 0f
     }
 
-    private fun startSettlingAnimation(animated: Boolean, releaseVelocityPxPerSecond: Float) {
+    private fun startSettlingAnimation(animated: Boolean, initialVelocityPxPerSecond: Float) {
         val start = currentOffsetPx().roundToInt()
         val end = offsetForPage(targetPage).roundToInt()
         scroller.abortAnimation()
@@ -548,9 +678,7 @@ internal class RNPagerView(private val reactContext: ThemedReactContext) : ViewG
             finishSettlingAtPage(targetPage)
             return
         }
-        if (settlingSource != SettlingSource.Release ||
-            !startReleaseFling(start, end, releaseVelocityPxPerSecond)
-        ) {
+        if (!tryStartFling(start, end, initialVelocityPxPerSecond)) {
             if (orientation == Orientation.Horizontal) {
                 scroller.startScroll(start, 0, end - start, 0)
             } else {
@@ -560,7 +688,7 @@ internal class RNPagerView(private val reactContext: ThemedReactContext) : ViewG
         postInvalidateOnAnimation()
     }
 
-    private fun startReleaseFling(start: Int, end: Int, velocityPxPerSecond: Float): Boolean {
+    private fun tryStartFling(start: Int, end: Int, velocityPxPerSecond: Float): Boolean {
         val distance = end - start
         if (distance == 0 || velocityPxPerSecond * distance <= 0f) return false
         val minOffset = min(start, end)
@@ -708,6 +836,7 @@ internal class RNPagerView(private val reactContext: ThemedReactContext) : ViewG
     }
 
     private companion object {
+        const val ACCESSIBILITY_CLASS_NAME = "androidx.viewpager.widget.ViewPager"
         const val INVALID_POINTER_ID = -1
     }
 }

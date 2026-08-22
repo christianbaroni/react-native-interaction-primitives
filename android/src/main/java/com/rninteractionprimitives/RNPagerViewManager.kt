@@ -25,6 +25,11 @@ internal class RNPagerViewManager :
 
     override fun needsCustomLayoutForChildren(): Boolean = true
 
+    override fun onAfterUpdateTransaction(view: RNPagerView) {
+        super.onAfterUpdateTransaction(view)
+        view.flushPendingPageScrollSnapshot()
+    }
+
     override fun addView(parent: RNPagerView, child: View, index: Int) {
         if (child is RNPagerPageView) parent.addPagerPage(child, index)
     }

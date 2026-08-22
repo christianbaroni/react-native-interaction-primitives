@@ -8,6 +8,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, assign) BOOL pagerScrollEnabled;
 
 - (void)prepareForPagerMotion;
+- (void)stopPagerScrollMotion;
 - (void)willRemoveContentView:(UIView *)view;
 @end
 
