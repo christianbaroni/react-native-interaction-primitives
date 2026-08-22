@@ -81,7 +81,7 @@ static NSString *RNSideDrawerHapticValue(RNSideDrawerViewGestureReleaseHaptic va
   if ((self = [super initWithFrame:frame])) {
     static const auto defaultProps = std::make_shared<const RNSideDrawerPanelViewProps>();
     _props = defaultProps;
-    self.clipsToBounds = YES;
+    self.clipsToBounds = NO;
   }
   return self;
 }

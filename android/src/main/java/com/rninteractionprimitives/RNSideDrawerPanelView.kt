@@ -5,8 +5,8 @@ import com.facebook.react.uimanager.ThemedReactContext
 
 internal class RNSideDrawerPanelView(reactContext: ThemedReactContext) : FrameLayout(reactContext) {
     init {
-        clipChildren = true
-        clipToPadding = true
+        clipChildren = false
+        clipToPadding = false
     }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {

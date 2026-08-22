@@ -17,7 +17,7 @@ function between(value: string, start: string, end: string): string {
   return value.slice(contentStart, endIndex);
 }
 
-describe('Android native slot layout ownership', () => {
+describe('Android native view ownership', () => {
   it('lays out only component-owned layers in the drawer content host', () => {
     const content = source('RNSideDrawerContentView.kt');
     const manager = source('RNSideDrawerContentViewManager.kt');
@@ -47,5 +47,15 @@ describe('Android native slot layout ownership', () => {
     expect(panel).not.toContain('.measure(');
     expect(panel).not.toContain('.layout(');
     expect(manager).not.toContain('needsCustomLayoutForChildren');
+  });
+
+  it('clips transformed drawer content only at the drawer root', () => {
+    const panel = source('RNSideDrawerPanelView.kt');
+    const root = source('RNSideDrawerView.kt');
+
+    expect(panel).toContain('clipChildren = false');
+    expect(panel).toContain('clipToPadding = false');
+    expect(root).toContain('clipChildren = true');
+    expect(root).toContain('clipToPadding = true');
   });
 });

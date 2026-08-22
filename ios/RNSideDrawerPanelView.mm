@@ -10,7 +10,7 @@
 {
   if ((self = [super initWithFrame:frame])) {
     _reactSubviews = [NSMutableArray arrayWithCapacity:1];
-    self.clipsToBounds = YES;
+    self.clipsToBounds = NO;
   }
   return self;
 }
