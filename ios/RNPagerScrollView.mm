@@ -15,6 +15,7 @@ bool scrollRange(
   if (!scrollView.scrollEnabled || !scrollView.panGestureRecognizer.enabled) return false;
 
   const UIEdgeInsets inset = scrollView.adjustedContentInset;
+
   if (orientation == RNPagerOrientationHorizontal) {
     minimumOffset = -inset.left;
     maximumOffset = MAX(minimumOffset, scrollView.contentSize.width - scrollView.bounds.size.width + inset.right);
@@ -22,9 +23,11 @@ bool scrollRange(
     minimumOffset = -inset.top;
     maximumOffset = MAX(minimumOffset, scrollView.contentSize.height - scrollView.bounds.size.height + inset.bottom);
   }
+
   const BOOL alwaysBouncesOnAxis = orientation == RNPagerOrientationHorizontal
       ? scrollView.alwaysBounceHorizontal
       : scrollView.alwaysBounceVertical;
+
   return maximumOffset > minimumOffset || (scrollView.bounces && alwaysBouncesOnAxis);
 }
 
@@ -319,10 +322,12 @@ void stopScrollMotion(UIScrollView *scrollView)
   const CGFloat crossAxisVelocity = self.pagerOrientation == RNPagerOrientationHorizontal
       ? velocity.y
       : velocity.x;
+
   if (fabs(mainAxisVelocity) <= fabs(crossAxisVelocity)) {
     [self yieldToDescendant];
     return NO;
   }
+
   if (touchedScrollViewCanConsumePan(
           _touchedView,
           self,
