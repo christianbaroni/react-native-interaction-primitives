@@ -58,6 +58,22 @@ describe('Android native view ownership', () => {
     expect(root).toContain('clipChildren = true');
     expect(root).toContain('clipToPadding = true');
   });
+
+  it('derives scrim hit ownership from the drawer target, not visual progress', () => {
+    const content = source('RNSideDrawerContentView.kt');
+    const root = source('RNSideDrawerView.kt');
+    const mount = between(root, 'fun addDrawerSlot(', 'fun drawerSlotCount');
+    const transition = between(root, 'private fun startTransition(', 'private fun startTransitionAnimation');
+    const presentation = between(root, 'private fun applyPresentation()', 'private fun publishProgress');
+
+    expect(content).toContain('fun setDrawerScrimEnabled(enabled: Boolean)');
+    expect(content).toContain('if (scrim.isClickable != enabled) scrim.isClickable = enabled');
+    expect(content).toContain('get() = if (isClickable) PointerEvents.AUTO else PointerEvents.NONE');
+    expect(mount).toContain('child.setDrawerScrimEnabled(targetOpen)');
+    expect(transition).toContain('contentView?.setDrawerScrimEnabled(openAtEnd)');
+    expect(presentation).toContain('content.setDrawerScrimEnabled(targetOpen)');
+    expect(content + root).not.toContain('setDrawerProgress');
+  });
 });
 
 describe('Android drawer transition ownership', () => {

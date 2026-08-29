@@ -27,6 +27,30 @@ describe('iOS native view ownership', () => {
     expect(fabricManager).toContain('self.clipsToBounds = NO;');
     expect(root).toContain('self.clipsToBounds = YES;');
   });
+
+  it('derives scrim hit ownership from the drawer target, not visual progress', () => {
+    const paperContent = source('RNSideDrawerContentView.mm');
+    const fabricContent = source('RNSideDrawerViewManager.mm');
+    const slots = source('RNSideDrawerSlots.h');
+    const root = source('RNSideDrawerView.mm');
+    const mount = between(root, '- (void)mountSlot:', '- (void)unmountSlot:');
+    const presentation = between(
+      root,
+      '- (void)applyPresentationAtProgress:(CGFloat)progress\n{',
+      '- (void)applyMotionAtProgress:(CGFloat)progress\n{'
+    );
+    const prepare = between(root, '- (void)prepareViewsForTransition\n{', '- (UIScreen *)currentScreen\n{');
+
+    expect(slots).toContain('- (void)setDrawerScrimEnabled:(BOOL)enabled;');
+    expect(paperContent).toContain('- (void)setDrawerScrimEnabled:(BOOL)enabled');
+    expect(paperContent).toContain('_scrimView.userInteractionEnabled != enabled');
+    expect(fabricContent).toContain('- (void)setDrawerScrimEnabled:(BOOL)enabled');
+    expect(fabricContent).toContain('_scrimView.userInteractionEnabled != enabled');
+    expect(mount).toContain('[_contentView setDrawerScrimEnabled:_targetOpen]');
+    expect(presentation).toContain('[_contentView setDrawerScrimEnabled:_targetOpen]');
+    expect(prepare).toContain('[_contentView setDrawerScrimEnabled:_targetOpen]');
+    expect(paperContent + fabricContent + slots + root).not.toContain('setDrawerProgress');
+  });
 });
 
 describe('iOS drawer transition ownership', () => {

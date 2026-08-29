@@ -142,9 +142,8 @@ static NSString *RNSideDrawerHapticValue(RNSideDrawerViewGestureReleaseHaptic va
   if (self.onScrimPress != nil) self.onScrimPress();
 }
 
-- (void)setDrawerProgress:(CGFloat)progress
+- (void)setDrawerScrimEnabled:(BOOL)enabled
 {
-  BOOL enabled = progress > 0.001;
   if (_scrimView.userInteractionEnabled != enabled) _scrimView.userInteractionEnabled = enabled;
 }
 

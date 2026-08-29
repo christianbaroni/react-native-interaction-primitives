@@ -630,6 +630,7 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
     [_contentHostView addSubview:slot];
     [_contentHostView.layer addSublayer:_contentBorderLayer];
     [_contentView setDrawerOverlayColor:_overlayColor];
+    [_contentView setDrawerScrimEnabled:_targetOpen];
     [self applyContentCorners];
   }
 
@@ -1238,7 +1239,7 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
   [self positionContentForReveal:_reveal];
   [self applyMotionAtProgress:progress];
   [CATransaction commit];
-  [_contentView setDrawerProgress:progress];
+  [_contentView setDrawerScrimEnabled:_targetOpen];
 
   BOOL panelEnabled = _phase != RNSideDrawerPhaseClosed;
   if (_panelView.userInteractionEnabled != panelEnabled) _panelView.userInteractionEnabled = panelEnabled;
@@ -1302,7 +1303,7 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
 - (void)prepareViewsForTransition
 {
   _panelView.userInteractionEnabled = YES;
-  [_contentView setDrawerProgress:MAX([self revealProgress], 0.0011)];
+  [_contentView setDrawerScrimEnabled:_targetOpen];
   _panelView.accessibilityElementsHidden = NO;
   _contentView.accessibilityElementsHidden = NO;
 }

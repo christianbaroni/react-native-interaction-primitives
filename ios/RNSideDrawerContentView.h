@@ -11,7 +11,7 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)removeReactSubview:(UIView *)subview;
 - (void)setDrawerOverlayColor:(UIColor *)color;
 - (void)setDrawerOverlayOpacity:(CGFloat)opacity;
-- (void)setDrawerProgress:(CGFloat)progress;
+- (void)setDrawerScrimEnabled:(BOOL)enabled;
 @end
 
 NS_ASSUME_NONNULL_END

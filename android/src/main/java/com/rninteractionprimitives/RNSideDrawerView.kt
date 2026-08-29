@@ -499,6 +499,7 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
                 child.setDrawerBorderColor(contentBorderColor)
                 child.setDrawerBorderWidth(contentBorderWidthPx)
                 child.setDrawerOverlayColor(overlayColor)
+                child.setDrawerScrimEnabled(targetOpen)
                 child.onScrimPress = { close(true) }
                 contentPresentationView.setContentView(child)
             }
@@ -626,6 +627,7 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
     ) {
         activeInteraction = interaction
         targetOpen = openAtEnd
+        contentView?.setDrawerScrimEnabled(openAtEnd)
         settlingSource = source
         phase = Phase.Settling
         publishProgress()
@@ -916,7 +918,7 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
             content.setDrawerBorderOpacity(
                 motion.evaluate(SideDrawerMotionChannel.ContentBorderOpacity, currentProgress, 1f),
             )
-            content.setDrawerProgress(currentProgress)
+            content.setDrawerScrimEnabled(targetOpen)
         }
         val panelEnabled = currentProgress > 0.001f
         if (panelView?.isEnabled != panelEnabled) panelView?.isEnabled = panelEnabled

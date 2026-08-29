@@ -349,9 +349,8 @@ internal class RNSideDrawerContentView(reactContext: ThemedReactContext) : Frame
         super.removeViewAt(index)
     }
 
-    fun setDrawerProgress(progress: Float) {
-        val clickable = progress > 0.001f
-        if (scrim.isClickable != clickable) scrim.isClickable = clickable
+    fun setDrawerScrimEnabled(enabled: Boolean) {
+        if (scrim.isClickable != enabled) scrim.isClickable = enabled
     }
 
     fun setDrawerBorderColor(color: Int) {
