@@ -272,12 +272,14 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
 
   CGFloat width = self.bounds.size.width;
   CGFloat height = self.bounds.size.height;
+
   _contactBackingView.bounds = CGRectMake(0, 0, width, height);
   _panelView.bounds = CGRectMake(0, 0, width, height);
   _contentPresentationView.bounds = CGRectMake(0, 0, width, height);
   _contentHostView.frame = _contentPresentationView.bounds;
   _contentBorderLayer.frame = _contentHostView.bounds;
   _contentView.frame = _contentHostView.bounds;
+
   if (firstLayout) {
     _reveal = _initialOpen ? _laidOutDrawerWidth : 0;
   } else if (previousReveal < 0) {
@@ -289,8 +291,10 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
   } else {
     _reveal = _open ? _laidOutDrawerWidth : 0;
   }
+
   _scrollView.contentSize = CGSizeMake(width + _laidOutDrawerWidth, height);
   _hasLaidOut = YES;
+
   if (_phase == RNSideDrawerPhaseDragging) {
     _unconstrainedDragPosition =
         rnsidedrawer::remapPositionForWidthChange(previousDragPosition, previousDrawerWidth, _laidOutDrawerWidth);
@@ -303,6 +307,7 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
     _dragStartPosition = _unconstrainedDragPosition;
     _dragStartTranslation = [_scrollView.panGestureRecognizer translationInView:self].x * _openingDirection;
   }
+
   [self setScrollOffset:[self scrollOffsetForProgress:[self revealProgress]]];
   [self applyPresentationAtProgress:[self revealProgress]];
   [self applyContentCorners];
@@ -328,17 +333,20 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
     _phase = _open ? RNSideDrawerPhaseOpen : RNSideDrawerPhaseClosed;
     _lastEmittedOpen = _open;
   }
+
   [self flushPendingProgressSnapshot];
 }
 
 - (void)didMoveToWindow
 {
   [super didMoveToWindow];
+
   if (self.window == nil) {
     [self stopPresentationDisplayLink];
   } else {
     [self refreshPresentationDisplayLink];
   }
+
   [self applyContentCorners];
   [self updateContentBorderColor];
   [self updateContentShadowColor];
@@ -505,6 +513,7 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
 {
   if (_gestureEnabled == gestureEnabled) return;
   _gestureEnabled = gestureEnabled;
+
   if (!gestureEnabled && _phase == RNSideDrawerPhaseDragging) {
     [self setOpen:[self revealProgress] >= _activeInteraction.releaseOpenThreshold
          animated:YES
@@ -536,6 +545,7 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
 {
   _initialOpen = initialOpen;
   if (_hasLaidOut) return;
+
   _open = initialOpen;
   _targetOpen = initialOpen;
   _lastEmittedOpen = initialOpen;
@@ -547,6 +557,7 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
   _motionConfig = [motionConfig copy];
   _motion = rnsidedrawer::compileMotion(_motionConfig);
   if (!_hasLaidOut) return;
+
   if (_phase == RNSideDrawerPhaseSettling) {
     CGFloat reveal = [self presentedReveal];
     [CATransaction begin];
@@ -556,6 +567,7 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
   } else {
     [self applyPresentationAtProgress:[self revealProgress]];
   }
+
   [self refreshPresentationDisplayLink];
 }
 
@@ -592,6 +604,7 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
 {
   NSUInteger boundedIndex = MIN((NSUInteger)MAX(index, 0), _slots.count);
   [_slots insertObject:slot atIndex:boundedIndex];
+
   if ([slot conformsToProtocol:@protocol(RNSideDrawerPanelSlot)]) {
     _panelView = (UIView<RNSideDrawerPanelSlot> *)slot;
     [_scrollView insertSubview:slot aboveSubview:_contactBackingView];
@@ -607,6 +620,7 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
     [_contentView setDrawerOverlayColor:_overlayColor];
     [self applyContentCorners];
   }
+
   [self setNeedsLayout];
 }
 
@@ -674,25 +688,31 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
   }
   if ((_phase == RNSideDrawerPhaseOpen && open) || (_phase == RNSideDrawerPhaseClosed && !open)) return;
   if (animated && _phase == RNSideDrawerPhaseSettling && _targetOpen == open) return;
+
   CGFloat revealVelocity = _phase == RNSideDrawerPhaseSettling ? [self stopTransitionAtCurrentPosition] : 0;
   BOOL cancelActiveDrag = _phase == RNSideDrawerPhaseDragging;
+
   if (cancelActiveDrag) {
     [self updateDragFromPanGesture];
     [self applyPresentationAtProgress:[self revealProgress]];
     _suppressCurrentDragRelease = YES;
   }
+
   _targetOpen = open;
   _settlingSource = source;
   _phase = RNSideDrawerPhaseSettling;
+
   if (cancelActiveDrag) {
     [self cancelActiveDragAtScrollOffset:[self scrollOffsetForProgress:[self revealProgress]]];
     [self applyPresentationAtProgress:[self revealProgress]];
   }
+
   [self publishProgress];
   if (!animated) {
     [self completeTransitionWithDrawerOpen:open];
     return;
   }
+
   rnsidedrawer::Interaction interaction =
       cancelActiveDrag && source == RNSideDrawerSettlingSourceRelease
       ? _activeInteraction
@@ -717,9 +737,11 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
   BOOL targetOpen = _targetOpen;
   [self restoreTransitionLayerTiming];
   [self prepareViewsForTransition];
+
   CGFloat targetPosition = targetOpen ? _laidOutDrawerWidth : 0;
   CGFloat distance = targetPosition - _reveal;
   CGFloat normalizedVelocity = fabs(distance) > DBL_EPSILON ? _transitionVelocity / distance : 0;
+
   const rnsidedrawer::Spring &spring = _activeInteraction.spring;
   UISpringTimingParameters *timing = [[UISpringTimingParameters alloc]
       initWithMass:spring.mass
@@ -762,12 +784,14 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
   CGFloat resolvedVelocity = isfinite(initialVelocity) ? initialVelocity : 0;
   _targetOpen = targetOpen;
   _reveal = reveal;
+
   if (fabs(reveal - targetPosition) <= pixelTolerance) {
     _transitionVelocity = 0;
     _transitionPauseRequested = NO;
     _transitionActive = NO;
     return NO;
   }
+
   _transitionVelocity = resolvedVelocity;
   _lastTransitionTime = CACurrentMediaTime();
   _transitionPauseRequested = NO;
@@ -1139,8 +1163,10 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
   [self applyMotionAtProgress:progress];
   [CATransaction commit];
   [_contentView setDrawerProgress:progress];
+
   BOOL panelEnabled = _phase != RNSideDrawerPhaseClosed;
   if (_panelView.userInteractionEnabled != panelEnabled) _panelView.userInteractionEnabled = panelEnabled;
+
   if (progress <= 0.001) {
     if (!_panelView.accessibilityElementsHidden) _panelView.accessibilityElementsHidden = YES;
     if (_contentView.accessibilityElementsHidden) _contentView.accessibilityElementsHidden = NO;
@@ -1280,6 +1306,7 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
 {
   BOOL active = _transitionActive && _phase == RNSideDrawerPhaseSettling;
   BOOL needed = _transitionPauseRequested || _progressEventsEnabled || _motion.hasInterpolations();
+
   if (active && needed) {
     [self startPresentationDisplayLink];
   } else {
@@ -1293,10 +1320,12 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
     [self startPresentationDisplayLink];
     return;
   }
+
   if (!_transitionActive || _phase != RNSideDrawerPhaseSettling) {
     [self stopPresentationDisplayLink];
     return;
   }
+
   if (_transitionPauseRequested) {
     CALayer *layer = _contentPresentationView.layer;
     if (_transitionAnimator != nil && layer.speed != 0) {
@@ -1309,6 +1338,7 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
       _transitionVelocity = 0;
       return;
     }
+
     if (layer.speed == 0) {
       (void)[self stopTransitionAtCurrentPosition];
       _transitionActive = YES;
@@ -1316,9 +1346,12 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
       [self startPresentationDisplayLink];
       return;
     }
+
     if (_scrollView.tracking) return;
+
     BOOL targetOpen = _targetOpen;
     (void)[self stopTransitionAtCurrentPosition];
+
     if ([self prepareTransitionWithTargetOpen:targetOpen fromReveal:_reveal initialVelocity:0]) {
       [self startTransitionAnimator];
     } else {
@@ -1326,6 +1359,7 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
     }
     return;
   }
+
   if (_transitionAnimator == nil) {
     [self stopPresentationDisplayLink];
     return;
@@ -1333,12 +1367,14 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
 
   (void)displayLink;
   CGFloat reveal = [self presentedReveal];
+
   if (_motion.hasInterpolations()) {
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
     [self applyMotionAtProgress:RNSideDrawerClamp(reveal / MAX(_laidOutDrawerWidth, 1), 0, 1)];
     [CATransaction commit];
   }
+
   [self publishProgressForReveal:reveal];
 }
 
@@ -1390,12 +1426,14 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
 {
   if (!_progressEventsEnabled) return;
   if (self.progressHandler == nil && self.onProgress == nil) return;
+
   NSDictionary *payload = @{
     @"phase" : [self phaseName],
     @"progress" : @(RNSideDrawerClamp(reveal / MAX(_laidOutDrawerWidth, 1), 0, 1)),
     @"settlingSource" : [self settlingSourceName],
     @"targetOpen" : @(_targetOpen),
   };
+
   if (self.progressHandler != nil) self.progressHandler(payload);
   if (self.onProgress != nil) self.onProgress(payload);
 }
@@ -1404,8 +1442,10 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
 {
   if (_lastEmittedOpen == _open) return;
   _lastEmittedOpen = _open;
+
   if (!_openChangeEventsEnabled) return;
   if (self.openChangeHandler == nil && self.onOpenChange == nil) return;
+
   NSDictionary *payload = @{ @"open" : @(_open) };
   if (self.openChangeHandler != nil) self.openChangeHandler(payload);
   if (self.onOpenChange != nil) self.onOpenChange(payload);

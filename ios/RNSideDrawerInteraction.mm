@@ -26,6 +26,7 @@ rnsidedrawer::Spring makeSpring(CGFloat mass, CGFloat stiffness, CGFloat damping
   const CGFloat naturalFrequency = std::sqrt(naturalFrequencySquared);
   const CGFloat tolerance =
       32 * std::numeric_limits<CGFloat>::epsilon() * std::max(dampingRate, naturalFrequency);
+
   if (std::abs(dampingRate - naturalFrequency) <= tolerance) {
     return {
         mass,
@@ -72,6 +73,7 @@ rnsidedrawer::Spring resolveSpring(CGFloat mass, CGFloat stiffness, CGFloat damp
 
   const CGFloat naturalFrequencySquared = stiffness / mass;
   const CGFloat dampingRate = (damping / 2) / mass;
+
   if (!std::isfinite(naturalFrequencySquared) || naturalFrequencySquared <= 0 ||
       !std::isfinite(dampingRate) || dampingRate <= 0) {
     return kDefaultSpring;
@@ -88,8 +90,10 @@ CGFloat outwardDistanceAtTime(
     CGFloat outwardDirection) noexcept
 {
   if (time <= 0 || !std::isfinite(time)) return 0;
+
   const rnsidedrawer::SpringState state =
       rnsidedrawer::evaluateSpring(spring, displacement, velocity, time);
+
   return std::isfinite(state.displacement)
       ? outwardDirection * state.displacement
       : std::numeric_limits<CGFloat>::infinity();
@@ -103,6 +107,7 @@ CGFloat maximumOutwardDistance(
 {
   const CGFloat outwardDirection = target > 0 ? 1 : -1;
   const CGFloat displacement = position - target;
+
   CGFloat maximumDistance = std::max<CGFloat>(0, outwardDirection * displacement);
 
   if (spring.dampingType == rnsidedrawer::DampingType::Underdamped) {
@@ -112,6 +117,7 @@ CGFloat maximumOutwardDistance(
     const CGFloat phase = std::atan2(velocity, sineCoefficient);
     const CGFloat rootIndex = std::floor(phase / M_PI) + 1;
     const CFTimeInterval firstExtremum = (rootIndex * M_PI - phase) / angularFrequency;
+
     maximumDistance = std::max(
         maximumDistance,
         outwardDistanceAtTime(spring, displacement, velocity, firstExtremum, outwardDirection));
@@ -123,6 +129,7 @@ CGFloat maximumOutwardDistance(
             velocity,
             firstExtremum + M_PI / angularFrequency,
             outwardDirection));
+
     return std::max<CGFloat>(0, maximumDistance);
   }
 
@@ -133,6 +140,7 @@ CGFloat maximumOutwardDistance(
     const CGFloat slowCoefficient = (velocity - fastRate * displacement) / (slowRate - fastRate);
     const CGFloat fastCoefficient = displacement - slowCoefficient;
     const CGFloat denominator = slowRate * slowCoefficient;
+
     if (denominator != 0 && std::isfinite(denominator)) {
       const CGFloat ratio = -(fastRate * fastCoefficient) / denominator;
       if (ratio > 0 && std::isfinite(ratio)) {
@@ -151,12 +159,14 @@ CGFloat maximumOutwardDistance(
 
   const CGFloat coefficient = velocity + spring.dampingRate * displacement;
   const CGFloat denominator = spring.dampingRate * coefficient;
+
   if (denominator != 0 && std::isfinite(denominator)) {
     maximumDistance = std::max(
         maximumDistance,
         outwardDistanceAtTime(
             spring, displacement, velocity, velocity / denominator, outwardDirection));
   }
+
   return std::max<CGFloat>(0, maximumDistance);
 }
 
@@ -226,6 +236,7 @@ SpringState evaluateSpring(
 
   const CGFloat coefficient = initialVelocity + spring.dampingRate * initialDisplacement;
   const CGFloat decay = std::exp(-spring.dampingRate * elapsed);
+
   return {
       (initialDisplacement + coefficient * elapsed) * decay,
       (initialVelocity - spring.dampingRate * coefficient * elapsed) * decay};
@@ -260,6 +271,7 @@ CGFloat resistedVelocity(
     CGFloat velocity) noexcept
 {
   if (!std::isfinite(velocity)) return 0;
+
   if (maximumOverdrag <= 0) {
     if ((unconstrainedPosition <= lowerBound && velocity < 0) ||
         (unconstrainedPosition >= upperBound && velocity > 0)) {
@@ -267,6 +279,7 @@ CGFloat resistedVelocity(
     }
     return velocity;
   }
+
   if (unconstrainedPosition >= lowerBound && unconstrainedPosition <= upperBound) return velocity;
 
   const CGFloat boundary = unconstrainedPosition < lowerBound ? lowerBound : upperBound;
@@ -286,8 +299,10 @@ bool releaseShouldOpen(
       ? clamp(decelerationRate, 0, 0.999999)
       : UIScrollViewDecelerationRateNormal;
   const CGFloat boundedPosition = clamp(position, 0, openPosition);
-  CGFloat projectedPosition = boundedPosition;
   const CGFloat scaledVelocity = velocity * velocitySensitivity;
+
+  CGFloat projectedPosition = boundedPosition;
+
   if (std::isnan(scaledVelocity)) {
     projectedPosition = boundedPosition;
   } else if (std::isinf(scaledVelocity)) {
@@ -295,6 +310,7 @@ bool releaseShouldOpen(
   } else {
     projectedPosition += scaledVelocity / kMillisecondsPerSecond * rate / (1 - rate);
   }
+
   return clamp(projectedPosition, 0, openPosition) >= openPosition * openThreshold;
 }
 
@@ -309,7 +325,9 @@ CGFloat limitReleaseVelocity(
   const CGFloat currentDistance = std::max<CGFloat>(0, outwardDirection * (position - target));
   const CGFloat naturalDistance = maximumOutwardDistance(position, 0, target, spring);
   const CGFloat allowedDistance = std::max(maximumOverdrag, std::max(currentDistance, naturalDistance));
+
   if (velocity == 0) return 0;
+  
   if (std::isfinite(velocity) && maximumOutwardDistance(position, velocity, target, spring) <= allowedDistance) {
     return velocity;
   }
@@ -317,9 +335,11 @@ CGFloat limitReleaseVelocity(
   const CGFloat direction = velocity < 0 ? -1 : 1;
   const CGFloat requestedMagnitude = std::abs(velocity);
   const CGFloat estimate = spring.dampingRate * std::max<CGFloat>(allowedDistance, 1);
+
   CGFloat upperMagnitude =
       std::isfinite(estimate) ? std::max<CGFloat>(1, std::min(requestedMagnitude, estimate)) : 1;
   CGFloat lowerMagnitude = 0;
+
   while (true) {
     const CGFloat distance = maximumOutwardDistance(position, direction * upperMagnitude, target, spring);
     if (!std::isfinite(distance) || distance > allowedDistance) break;
@@ -331,12 +351,14 @@ CGFloat limitReleaseVelocity(
   for (int iteration = 0; iteration < 40; iteration += 1) {
     const CGFloat candidateMagnitude = lowerMagnitude + (upperMagnitude - lowerMagnitude) * 0.5;
     const CGFloat distance = maximumOutwardDistance(position, direction * candidateMagnitude, target, spring);
+
     if (!std::isfinite(distance) || distance > allowedDistance) {
       upperMagnitude = candidateMagnitude;
     } else {
       lowerMagnitude = candidateMagnitude;
     }
   }
+
   return direction * lowerMagnitude;
 }
 
