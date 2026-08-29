@@ -62,17 +62,22 @@ typedef NS_ENUM(NSInteger, RNSideDrawerSettlingSource) {
                         initialVelocity:(CGFloat)initialVelocity;
 - (void)startTransitionAnimator;
 - (CGFloat)stopTransitionAtCurrentPosition;
-- (void)requestTransitionPause;
+- (void)requestTransitionInterruption;
 - (void)restoreTransitionLayerTiming;
 - (void)completeTransitionWithDrawerOpen:(BOOL)open;
 - (void)advanceTransitionToTime:(CFTimeInterval)time;
 
 - (BOOL)canBeginPanWithVelocity:(CGPoint)velocity;
 - (void)handleContactBegin;
+- (void)beginAdmittedDrag;
 - (void)handlePanGesture:(UIPanGestureRecognizer *)panGestureRecognizer;
 - (void)updateDragFromPanGesture;
+- (CGFloat)dragTranslation;
+- (CGFloat)dragVelocity;
 - (CGFloat)releaseRevealVelocity;
-- (void)commitReleaseWithRevealVelocity:(CGFloat)revealVelocity targetOpen:(BOOL)targetOpen;
+- (void)commitCurrentDragRelease;
+- (void)commitCancelledDrag;
+- (void)startCommittedRelease;
 - (void)cancelActiveDragAtScrollOffset:(CGFloat)offset;
 - (void)stopScrollMotionAtOffset:(CGFloat)offset;
 
@@ -127,17 +132,22 @@ typedef NS_ENUM(NSInteger, RNSideDrawerSettlingSource) {
   CGFloat _dragStartTranslation;
   CGFloat _dragLowerBound;
   CGFloat _dragUpperBound;
+  UIGestureRecognizerState _deferredPanState;
+  CGFloat _deferredPanTranslation;
+  CGFloat _deferredPanVelocity;
 
   UIViewPropertyAnimator *_transitionAnimator;
   CADisplayLink *_presentationDisplayLink;
   UIScreen *_presentationDisplayScreen;
   BOOL _transitionActive;
-  BOOL _transitionPauseRequested;
+  BOOL _transitionInterruptionPending;
+  CGFloat _interruptionScrollOffset;
   CGFloat _transitionVelocity;
   CFTimeInterval _lastTransitionTime;
 
   rnsidedrawer::InteractionConfiguration _configuredInteraction;
   rnsidedrawer::Interaction _activeInteraction;
+  rnsidedrawer::Interaction _admittedInteraction;
   rnsidedrawer::Motion _motion;
 }
 
@@ -183,6 +193,7 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
     _overlayColor = UIColor.clearColor;
     _configuredInteraction = kDefaultInteractionConfiguration;
     _activeInteraction = rnsidedrawer::resolveInteraction(_configuredInteraction);
+    _admittedInteraction = _activeInteraction;
     _drawerWidth = 0;
     _gestureEnabled = YES;
     _side = RNSideDrawerSideStart;
@@ -257,7 +268,7 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
   [super layoutSubviews];
   BOOL firstLayout = !_hasLaidOut;
   BOOL resumeSettling = _phase == RNSideDrawerPhaseSettling;
-  BOOL resumePaused = _transitionPauseRequested;
+  BOOL resumeInterruption = _transitionInterruptionPending;
   BOOL targetOpen = _targetOpen;
   CGFloat resumeVelocity = resumeSettling ? [self stopTransitionAtCurrentPosition] : 0;
   CGFloat previousDrawerWidth = _laidOutDrawerWidth;
@@ -313,9 +324,10 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
   [self applyContentCorners];
 
   if (resumeSettling) {
-    if (resumePaused) {
+    if (resumeInterruption) {
       _transitionActive = YES;
-      _transitionPauseRequested = YES;
+      _transitionInterruptionPending = YES;
+      _interruptionScrollOffset = [self currentScrollOffset];
       _transitionVelocity = 0;
       [self startPresentationDisplayLink];
     } else {
@@ -766,6 +778,12 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
     UIViewPropertyAnimator *strongAnimator = weakAnimator;
     if (strongSelf == nil || strongSelf->_transitionAnimator != strongAnimator) return;
     strongSelf->_transitionAnimator = nil;
+    if (strongSelf->_transitionInterruptionPending) {
+      strongSelf->_reveal = targetPosition;
+      strongSelf->_transitionVelocity = 0;
+      [strongSelf startPresentationDisplayLink];
+      return;
+    }
     [strongSelf completeTransitionWithDrawerOpen:targetOpen];
   }];
   _transitionAnimator = animator;
@@ -787,14 +805,14 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
 
   if (fabs(reveal - targetPosition) <= pixelTolerance) {
     _transitionVelocity = 0;
-    _transitionPauseRequested = NO;
+    _transitionInterruptionPending = NO;
     _transitionActive = NO;
     return NO;
   }
 
   _transitionVelocity = resolvedVelocity;
   _lastTransitionTime = CACurrentMediaTime();
-  _transitionPauseRequested = NO;
+  _transitionInterruptionPending = NO;
   _transitionActive = YES;
   return YES;
 }
@@ -805,23 +823,23 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
   CALayer *layer = _contentPresentationView.layer;
   BOOL layerPaused = layer.speed == 0;
   CGFloat pausedReveal = layerPaused ? [self presentedReveal] : 0;
-  if (!_scrollView.tracking && !_transitionPauseRequested) [self advanceTransitionToTime:CACurrentMediaTime()];
+  if (!_scrollView.tracking && !_transitionInterruptionPending) [self advanceTransitionToTime:CACurrentMediaTime()];
   CGFloat velocity = _transitionVelocity;
   [_transitionAnimator stopAnimation:YES];
   _transitionAnimator = nil;
   if (layerPaused) [self restoreTransitionLayerTiming];
   _reveal = layerPaused ? pausedReveal : [self revealFromContentPosition];
   _transitionActive = NO;
-  _transitionPauseRequested = NO;
+  _transitionInterruptionPending = NO;
   [self stopPresentationDisplayLink];
   [self applyPresentationAtProgress:[self revealProgress]];
   return velocity;
 }
 
-- (void)requestTransitionPause
+- (void)requestTransitionInterruption
 {
-  if (!_transitionActive || _transitionPauseRequested) return;
-  _transitionPauseRequested = YES;
+  if (!_transitionActive || _transitionInterruptionPending) return;
+  _transitionInterruptionPending = YES;
   [self startPresentationDisplayLink];
 }
 
@@ -840,13 +858,12 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
 - (void)handleContactBegin
 {
   [_hapticFeedback prepare];
-  [self requestTransitionPause];
 }
 
 - (void)completeTransitionWithDrawerOpen:(BOOL)open
 {
   _transitionActive = NO;
-  _transitionPauseRequested = NO;
+  _transitionInterruptionPending = NO;
   [_transitionAnimator stopAnimation:YES];
   _transitionAnimator = nil;
   [self restoreTransitionLayerTiming];
@@ -889,9 +906,10 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
 {
   if (!_gestureEnabled || _laidOutDrawerWidth <= 0 || fabs(velocity.x) <= fabs(velocity.y)) return NO;
 
+  CGFloat reveal = _transitionActive ? [self presentedReveal] : _reveal;
   CGFloat revealVelocity = velocity.x * _openingDirection;
-  if (_reveal <= 0) return revealVelocity > 0;
-  if (_reveal >= _laidOutDrawerWidth) return revealVelocity < 0;
+  if (reveal <= 0) return revealVelocity > 0;
+  if (reveal >= _laidOutDrawerWidth) return revealVelocity < 0;
   return YES;
 }
 
@@ -903,18 +921,33 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
   BOOL interruptedTargetOpen = _phase == RNSideDrawerPhaseSettling ? _targetOpen : _open;
   _gestureOriginOpen = interruptedTargetOpen;
   _gestureHapticTriggered = NO;
-  if (_transitionActive) [self stopTransitionAtCurrentPosition];
-  _activeInteraction = rnsidedrawer::resolveInteraction(_configuredInteraction);
+  _admittedInteraction = rnsidedrawer::resolveInteraction(_configuredInteraction);
+  _dragStartTranslation = [_scrollView.panGestureRecognizer translationInView:self].x * _openingDirection;
+  _deferredPanState = UIGestureRecognizerStatePossible;
+  _targetOpen = interruptedTargetOpen;
+  _releaseRevealVelocity = 0;
+
+  if (_transitionActive) {
+    _interruptionScrollOffset = [self currentScrollOffset];
+    [self requestTransitionInterruption];
+    return;
+  }
+
+  [self beginAdmittedDrag];
+}
+
+- (void)beginAdmittedDrag
+{
+  _activeInteraction = _admittedInteraction;
   _dragStartPosition = _reveal;
   _unconstrainedDragPosition = _dragStartPosition;
   _dragLowerBound = MIN(0, _reveal);
   _dragUpperBound = MAX(_laidOutDrawerWidth, _reveal);
-  _dragStartTranslation = [_scrollView.panGestureRecognizer translationInView:self].x * _openingDirection;
-  _targetOpen = interruptedTargetOpen;
-  _releaseRevealVelocity = 0;
   _settlingSource = RNSideDrawerSettlingSourceNone;
   _phase = RNSideDrawerPhaseDragging;
-  [_hapticFeedback prepare];
+
+  [self updateDragFromPanGesture];
+  [self applyPresentationAtProgress:[self revealProgress]];
   [self publishProgress];
 }
 
@@ -922,6 +955,15 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
 {
   (void)scrollView;
   CGFloat offset = [self currentScrollOffset];
+  if (_transitionInterruptionPending) {
+    if (offset != _interruptionScrollOffset) {
+      [CATransaction begin];
+      [CATransaction setDisableActions:YES];
+      [self setScrollOffset:_interruptionScrollOffset];
+      [CATransaction commit];
+    }
+    return;
+  }
   if (_phase != RNSideDrawerPhaseDragging) {
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
@@ -953,6 +995,57 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
     targetContentOffset->y = 0;
     return;
   }
+  if (_transitionInterruptionPending) {
+    _deferredPanState = UIGestureRecognizerStateEnded;
+    _deferredPanTranslation = [_scrollView.panGestureRecognizer translationInView:self].x * _openingDirection;
+    _deferredPanVelocity = [_scrollView.panGestureRecognizer velocityInView:self].x * _openingDirection;
+    targetContentOffset->x = [self currentScrollOffset];
+    targetContentOffset->y = 0;
+    return;
+  }
+  CGFloat currentOffset = [self currentScrollOffset];
+  [self commitCurrentDragRelease];
+  targetContentOffset->x = currentOffset;
+  targetContentOffset->y = 0;
+}
+
+- (void)scrollViewDidEndDragging:(UIScrollView *)scrollView willDecelerate:(BOOL)decelerate
+{
+  (void)scrollView;
+  (void)decelerate;
+  if (_suppressCurrentDragRelease) return;
+  if (_transitionInterruptionPending) {
+    if (_deferredPanState != UIGestureRecognizerStateEnded) {
+      _deferredPanState = UIGestureRecognizerStateCancelled;
+      _deferredPanTranslation = [_scrollView.panGestureRecognizer translationInView:self].x * _openingDirection;
+      _deferredPanVelocity = 0;
+    }
+    return;
+  }
+  if (_phase == RNSideDrawerPhaseDragging) {
+    if (_scrollView.panGestureRecognizer.state == UIGestureRecognizerStateEnded) {
+      [self commitCurrentDragRelease];
+    } else {
+      [self commitCancelledDrag];
+    }
+  }
+  [self startCommittedRelease];
+}
+
+- (void)scrollViewWillBeginDecelerating:(UIScrollView *)scrollView
+{
+  (void)scrollView;
+  if (_suppressCurrentDragRelease) {
+    [self stopScrollMotionAtOffset:[self currentScrollOffset]];
+    return;
+  }
+  if (_transitionInterruptionPending) return;
+  if (!_transitionActive) return;
+  [self stopScrollMotionAtOffset:[self currentScrollOffset]];
+}
+
+- (void)commitCurrentDragRelease
+{
   [self updateDragFromPanGesture];
   [self applyPresentationAtProgress:[self revealProgress]];
   CGFloat revealVelocity = [self releaseRevealVelocity];
@@ -963,39 +1056,32 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
       _scrollView.decelerationRate,
       _activeInteraction.releaseVelocitySensitivity,
       _activeInteraction.releaseOpenThreshold);
-  CGFloat currentOffset = [self currentScrollOffset];
-  [self commitReleaseWithRevealVelocity:revealVelocity targetOpen:targetOpen];
-  targetContentOffset->x = currentOffset;
-  targetContentOffset->y = 0;
+  if (targetOpen != _gestureOriginOpen && !_gestureHapticTriggered) {
+    _gestureHapticTriggered = YES;
+    CGPoint location = [_scrollView.panGestureRecognizer locationInView:self];
+    [_hapticFeedback triggerAtLocation:location];
+  }
+  CGFloat transferredVelocity = revealVelocity * _activeInteraction.releaseVelocityTransfer;
+  _releaseRevealVelocity = isfinite(transferredVelocity) ? transferredVelocity : 0;
+  _targetOpen = targetOpen;
+  _settlingSource = RNSideDrawerSettlingSourceRelease;
+  _phase = RNSideDrawerPhaseSettling;
   [self publishProgress];
 }
 
-- (void)scrollViewDidEndDragging:(UIScrollView *)scrollView willDecelerate:(BOOL)decelerate
+- (void)commitCancelledDrag
 {
-  (void)scrollView;
-  (void)decelerate;
-  if (_suppressCurrentDragRelease) return;
-  if (_phase == RNSideDrawerPhaseDragging) {
-    [self updateDragFromPanGesture];
-    [self applyPresentationAtProgress:[self revealProgress]];
-    if (_scrollView.panGestureRecognizer.state == UIGestureRecognizerStateEnded) {
-      CGFloat revealVelocity = [self releaseRevealVelocity];
-      BOOL targetOpen = rnsidedrawer::releaseShouldOpen(
-          _reveal,
-          revealVelocity,
-          _laidOutDrawerWidth,
-          _scrollView.decelerationRate,
-          _activeInteraction.releaseVelocitySensitivity,
-          _activeInteraction.releaseOpenThreshold);
-      [self commitReleaseWithRevealVelocity:revealVelocity targetOpen:targetOpen];
-    } else {
-      _targetOpen = [self revealProgress] >= _activeInteraction.releaseOpenThreshold;
-      _releaseRevealVelocity = 0;
-      _settlingSource = RNSideDrawerSettlingSourceRelease;
-      _phase = RNSideDrawerPhaseSettling;
-    }
-    [self publishProgress];
-  }
+  [self updateDragFromPanGesture];
+  [self applyPresentationAtProgress:[self revealProgress]];
+  _targetOpen = [self revealProgress] >= _activeInteraction.releaseOpenThreshold;
+  _releaseRevealVelocity = 0;
+  _settlingSource = RNSideDrawerSettlingSourceRelease;
+  _phase = RNSideDrawerPhaseSettling;
+  [self publishProgress];
+}
+
+- (void)startCommittedRelease
+{
   if (_phase != RNSideDrawerPhaseSettling) return;
   CGFloat offset = [self currentScrollOffset];
   BOOL shouldAnimate = [self prepareTransitionWithTargetOpen:_targetOpen
@@ -1007,31 +1093,6 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
   } else {
     [self completeTransitionWithDrawerOpen:_targetOpen];
   }
-}
-
-- (void)scrollViewWillBeginDecelerating:(UIScrollView *)scrollView
-{
-  (void)scrollView;
-  if (_suppressCurrentDragRelease) {
-    [self stopScrollMotionAtOffset:[self currentScrollOffset]];
-    return;
-  }
-  if (!_transitionActive) return;
-  [self stopScrollMotionAtOffset:[self currentScrollOffset]];
-}
-
-- (void)commitReleaseWithRevealVelocity:(CGFloat)revealVelocity targetOpen:(BOOL)targetOpen
-{
-  if (targetOpen != _gestureOriginOpen && !_gestureHapticTriggered) {
-    _gestureHapticTriggered = YES;
-    CGPoint location = [_scrollView.panGestureRecognizer locationInView:self];
-    [_hapticFeedback triggerAtLocation:location];
-  }
-  CGFloat transferredVelocity = revealVelocity * _activeInteraction.releaseVelocityTransfer;
-  _releaseRevealVelocity = isfinite(transferredVelocity) ? transferredVelocity : 0;
-  _targetOpen = targetOpen;
-  _settlingSource = RNSideDrawerSettlingSourceRelease;
-  _phase = RNSideDrawerPhaseSettling;
 }
 
 - (void)handlePanGesture:(UIPanGestureRecognizer *)panGestureRecognizer
@@ -1074,14 +1135,17 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
 
 - (CGFloat)releaseRevealVelocity
 {
-  CGFloat velocity = [_scrollView.panGestureRecognizer velocityInView:self].x * _openingDirection;
   return rnsidedrawer::resistedVelocity(
-      _unconstrainedDragPosition, _dragLowerBound, _dragUpperBound, _activeInteraction.overdrag, velocity);
+      _unconstrainedDragPosition,
+      _dragLowerBound,
+      _dragUpperBound,
+      _activeInteraction.overdrag,
+      [self dragVelocity]);
 }
 
 - (void)updateDragFromPanGesture
 {
-  CGFloat translation = [_scrollView.panGestureRecognizer translationInView:self].x * _openingDirection;
+  CGFloat translation = [self dragTranslation];
   CGFloat dragPosition = _dragStartPosition + translation - _dragStartTranslation;
   if (_activeInteraction.overdrag <= 0) {
     CGFloat boundedPosition = RNSideDrawerClamp(dragPosition, _dragLowerBound, _dragUpperBound);
@@ -1094,6 +1158,20 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
   _unconstrainedDragPosition = dragPosition;
   _reveal = rnsidedrawer::resistedPosition(
       dragPosition, _dragLowerBound, _dragUpperBound, _activeInteraction.overdrag);
+}
+
+- (CGFloat)dragTranslation
+{
+  return _deferredPanState == UIGestureRecognizerStatePossible
+      ? [_scrollView.panGestureRecognizer translationInView:self].x * _openingDirection
+      : _deferredPanTranslation;
+}
+
+- (CGFloat)dragVelocity
+{
+  return _deferredPanState == UIGestureRecognizerStateEnded
+      ? _deferredPanVelocity
+      : [_scrollView.panGestureRecognizer velocityInView:self].x * _openingDirection;
 }
 
 - (CGFloat)currentScrollOffset
@@ -1303,7 +1381,7 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
 - (void)refreshPresentationDisplayLink
 {
   BOOL active = _transitionActive && _phase == RNSideDrawerPhaseSettling;
-  BOOL needed = _transitionPauseRequested || _progressEventsEnabled || _motion.hasInterpolations();
+  BOOL needed = _transitionInterruptionPending || _progressEventsEnabled || _motion.hasInterpolations();
 
   if (active && needed) {
     [self startPresentationDisplayLink];
@@ -1324,7 +1402,7 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
     return;
   }
 
-  if (_transitionPauseRequested) {
+  if (_transitionInterruptionPending) {
     CALayer *layer = _contentPresentationView.layer;
     if (_transitionAnimator != nil && layer.speed != 0) {
       CFTimeInterval pausedTime = [layer convertTime:displayLink.targetTimestamp fromLayer:nil];
@@ -1337,25 +1415,22 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
       return;
     }
 
-    if (layer.speed == 0) {
+    if (layer.speed == 0 || _transitionAnimator == nil) {
       (void)[self stopTransitionAtCurrentPosition];
-      _transitionActive = YES;
-      _transitionPauseRequested = YES;
-      [self startPresentationDisplayLink];
+      [self beginAdmittedDrag];
+
+      UIGestureRecognizerState state = _deferredPanState == UIGestureRecognizerStatePossible
+          ? _scrollView.panGestureRecognizer.state
+          : _deferredPanState;
+      if (state == UIGestureRecognizerStateEnded) {
+        [self commitCurrentDragRelease];
+        [self startCommittedRelease];
+      } else if (state != UIGestureRecognizerStateBegan && state != UIGestureRecognizerStateChanged) {
+        [self commitCancelledDrag];
+        [self startCommittedRelease];
+      }
       return;
     }
-
-    if (_scrollView.tracking) return;
-
-    BOOL targetOpen = _targetOpen;
-    (void)[self stopTransitionAtCurrentPosition];
-
-    if ([self prepareTransitionWithTargetOpen:targetOpen fromReveal:_reveal initialVelocity:0]) {
-      [self startTransitionAnimator];
-    } else {
-      [self completeTransitionWithDrawerOpen:targetOpen];
-    }
-    return;
   }
 
   if (_transitionAnimator == nil) {

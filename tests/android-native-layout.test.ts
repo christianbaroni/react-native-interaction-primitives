@@ -74,13 +74,21 @@ describe('Android drawer transition ownership', () => {
     expect(interaction).not.toContain('maximumOutwardDistance');
   });
 
-  it('keeps touch pauses on the last choreographer-owned frame', () => {
+  it('interrupts only after horizontal intent at the last choreographer-owned frame', () => {
     const root = source('RNSideDrawerView.kt');
-    const pause = between(root, 'private fun pauseTransitionForTouch() {', 'private fun resumePausedTransition()');
+    const dispatch = between(root, 'override fun dispatchTouchEvent(', 'override fun requestDisallowInterceptTouchEvent(');
+    const intercept = between(root, 'override fun onInterceptTouchEvent(', 'override fun onTouchEvent(');
+    const begin = between(root, 'private fun beginDragging(', 'private fun clearTouchTracking(');
 
-    expect(pause).toContain('stopTransitionAnimation()');
-    expect(pause).toContain('transitionPausedForTouch = true');
-    expect(pause).not.toContain('synchronizeTransition()');
-    expect(pause).not.toContain('updateTransitionFrame(');
+    expect(root).not.toContain('transitionPausedForTouch');
+    expect(root).not.toContain('pauseTransitionForTouch');
+    expect(root).not.toContain('resumePausedTransition');
+    expect(dispatch).not.toContain('stopTransitionAnimation()');
+    expect(intercept).toContain('abs(deltaX) > touchSlop && abs(deltaX) > abs(deltaY)');
+    expect(intercept).toContain('if (drawerCanMove && horizontalIntent)');
+    expect(intercept).toContain('beginDragging(event.getX(pointerIndex))');
+    expect(begin).toContain('stopTransitionAnimation()');
+    expect(begin).not.toContain('synchronizeTransition()');
+    expect(begin).not.toContain('updateTransitionFrame(');
   });
 });

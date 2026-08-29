@@ -97,7 +97,6 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
     private var transitionInitialVelocityPxPerSecond = 0.0
     private var transitionVelocityPxPerSecond = 0.0
     private var transitionRunning = false
-    private var transitionPausedForTouch = false
     private val transitionState = SideDrawerSpringState()
 
     private var highFrameRateRequested = false
@@ -236,8 +235,6 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
                         0.0,
                         activeInteraction,
                     )
-                } else {
-                    resumePausedTransition()
                 }
                 clearTouchTracking()
             }
@@ -295,14 +292,8 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
     }
 
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
-        if (gestureEnabled && laidOutDrawerWidthPx > 0f && event.actionMasked == MotionEvent.ACTION_DOWN &&
-            phase == Phase.Settling
-        ) {
-            pauseTransitionForTouch()
-        }
         val handled = super.dispatchTouchEvent(event)
         if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) {
-            resumePausedTransition()
             finishTouch(event)
         }
         return handled
@@ -325,7 +316,6 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
     override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
         val firstLayout = !hasLaidOut
         val settlingBeforeLayout = phase == Phase.Settling
-        val resumePaused = transitionPausedForTouch
         if (settlingBeforeLayout) synchronizeTransition()
         val resumeSettling = phase == Phase.Settling
         val resumeVelocity = if (resumeSettling) transitionVelocityPxPerSecond else 0.0
@@ -369,12 +359,7 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
         applyPresentation()
 
         if (resumeSettling) {
-            if (resumePaused) {
-                transitionVelocityPxPerSecond = 0.0
-                transitionPausedForTouch = true
-            } else {
-                startTransition(targetOpen, resumeSource, true, resumeVelocity, activeInteraction)
-            }
+            startTransition(targetOpen, resumeSource, true, resumeVelocity, activeInteraction)
         } else if (firstLayout) {
             open = initialOpen
             targetOpen = open
@@ -390,7 +375,6 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
             MotionEvent.ACTION_DOWN -> {
                 gestureEligible = true
                 initializeTouch(event)
-                if (phase == Phase.Settling) pauseTransitionForTouch()
             }
             MotionEvent.ACTION_MOVE -> {
                 if (!gestureEligible) return false
@@ -417,7 +401,6 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
                 }
             }
             MotionEvent.ACTION_CANCEL, MotionEvent.ACTION_UP -> {
-                resumePausedTransition()
                 finishTouch(event)
             }
         }
@@ -466,8 +449,6 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
                     tracker.computeCurrentVelocity(1000, maximumFlingVelocity.toFloat())
                     val revealVelocity = tracker.getXVelocity(activePointerId) * openingDirection()
                     startReleaseTransition(revealVelocity, hasDragged)
-                } else {
-                    resumePausedTransition()
                 }
                 finishTouch(event)
                 return true
@@ -481,8 +462,6 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
                         0.0,
                         activeInteraction,
                     )
-                } else {
-                    resumePausedTransition()
                 }
                 finishTouch(event)
                 return true
@@ -620,7 +599,6 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
         if (phase == Phase.Settling) synchronizeTransition()
         val initialVelocity = if (phase == Phase.Settling) transitionVelocityPxPerSecond else 0.0
         stopTransitionAnimation()
-        transitionPausedForTouch = false
         if (isDragging) clearTouchTracking()
         startTransition(nextOpen, SettlingSource.Programmatic, animated, initialVelocity)
     }
@@ -652,7 +630,6 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
         phase = Phase.Settling
         publishProgress()
         stopTransitionAnimation()
-        transitionPausedForTouch = false
         val target = targetPosition(openAtEnd)
         val atRest = abs(revealPx - target) <= TRANSITION_POSITION_EPSILON_PX
         if (!animated || atRest) {
@@ -718,7 +695,6 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
 
     private fun completeTransition(openAtEnd: Boolean) {
         stopTransitionAnimation()
-        transitionPausedForTouch = false
         transitionVelocityPxPerSecond = 0.0
         revealPx = targetPosition(openAtEnd)
         open = openAtEnd
@@ -749,9 +725,7 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
         if (isDragging) return
         val wasSettling = phase == Phase.Settling
         val interruptedTarget = if (wasSettling) targetOpen else open
-        if (wasSettling && !transitionPausedForTouch) synchronizeTransition()
         stopTransitionAnimation()
-        transitionPausedForTouch = false
         isDragging = true
         activeInteraction = configuredInteraction
         beginDragPositionTracking(if (wasSettling) currentX else downX)
@@ -798,19 +772,6 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
 
     private fun synchronizeTransition() {
         if (transitionRunning) updateTransitionFrame(System.nanoTime())
-    }
-
-    private fun pauseTransitionForTouch() {
-        if (phase != Phase.Settling || transitionPausedForTouch) return
-        stopTransitionAnimation()
-        transitionVelocityPxPerSecond = 0.0
-        transitionPausedForTouch = true
-    }
-
-    private fun resumePausedTransition() {
-        if (!transitionPausedForTouch || phase != Phase.Settling) return
-        transitionPausedForTouch = false
-        startTransition(targetOpen, settlingSource, true, 0.0, activeInteraction)
     }
 
     private fun stopTransitionAnimation() {
