@@ -99,7 +99,6 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
     private var transitionRunning = false
     private var transitionPausedForTouch = false
     private val transitionState = SideDrawerSpringState()
-    private val excursionState = SideDrawerSpringState()
 
     private var highFrameRateRequested = false
 
@@ -635,17 +634,9 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
         )
         val nextOpen = projectedPosition >= laidOutDrawerWidthPx * interaction.releaseOpenThreshold
         if (performHaptic && nextOpen != gestureOriginOpen) gestureReleaseHaptic?.perform(this)
-        val target = targetPosition(nextOpen)
         val transferredVelocity = presentedVelocity * interaction.releaseVelocityTransfer
-        val boundedVelocity = limitSideDrawerReleaseVelocity(
-            revealPx,
-            transferredVelocity,
-            target,
-            interaction.spring,
-            interaction.overdragPx,
-            excursionState,
-        )
-        startTransition(nextOpen, SettlingSource.Release, true, boundedVelocity, interaction)
+        val initialVelocity = if (transferredVelocity.isFinite()) transferredVelocity else 0.0
+        startTransition(nextOpen, SettlingSource.Release, true, initialVelocity, interaction)
     }
 
     private fun startTransition(

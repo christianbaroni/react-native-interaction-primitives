@@ -30,6 +30,24 @@ describe('iOS native view ownership', () => {
 });
 
 describe('iOS drawer transition ownership', () => {
+  it('hands finite release velocity directly to the spring', () => {
+    const interaction = source('RNSideDrawerInteraction.mm');
+    const root = source('RNSideDrawerView.mm');
+    const release = between(
+      root,
+      '- (void)commitReleaseWithRevealVelocity:(CGFloat)revealVelocity targetOpen:(BOOL)targetOpen\n{',
+      '- (void)handlePanGesture:'
+    );
+    const start = between(root, '- (void)startTransitionAnimator\n{', '- (BOOL)prepareTransitionWithTargetOpen:');
+
+    expect(release).toContain('revealVelocity * _activeInteraction.releaseVelocityTransfer');
+    expect(release).toContain('_releaseRevealVelocity = isfinite(transferredVelocity) ? transferredVelocity : 0');
+    expect(release).not.toContain('overdrag');
+    expect(start).toContain('_transitionVelocity / distance');
+    expect(interaction).not.toContain('limitReleaseVelocity');
+    expect(interaction).not.toContain('maximumOutwardDistance');
+  });
+
   it('freezes the target frame, then restores ordinary layer timing', () => {
     const root = source('RNSideDrawerView.mm');
     const start = between(root, '- (void)startTransitionAnimator\n{', '- (BOOL)prepareTransitionWithTargetOpen:');

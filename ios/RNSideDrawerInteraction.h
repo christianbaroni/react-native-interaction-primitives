@@ -73,11 +73,4 @@ bool releaseShouldOpen(
     CGFloat velocitySensitivity,
     CGFloat openThreshold) noexcept;
 
-CGFloat limitReleaseVelocity(
-    CGFloat position,
-    CGFloat velocity,
-    CGFloat target,
-    const Spring &spring,
-    CGFloat maximumOverdrag) noexcept;
-
 } // namespace rnsidedrawer

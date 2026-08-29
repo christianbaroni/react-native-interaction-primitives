@@ -92,7 +92,7 @@ export type SideDrawerInteraction = Readonly<{
     /** Scale applied to release velocity before the settling spring begins. */
     velocityTransfer?: number;
   }>;
-  /** Endpoint travel admitted from direct manipulation and release energy, in points or density-independent pixels. */
+  /** Maximum resisted endpoint travel during direct manipulation, in points or density-independent pixels. */
   overdrag?: number;
 }>;
 

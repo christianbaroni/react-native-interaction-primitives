@@ -187,9 +187,9 @@ interaction={{
 
 `openThreshold` is the projected reveal progress that selects open and must be in `[0, 1]`. `velocitySensitivity` changes only endpoint selection: `0` ignores velocity, `1` preserves the accepted platform-native prediction, and larger values make decisive flings more influential. It is not an animation duration and does not need to track the spring.
 
-`velocityTransfer` changes only how much mapped finger velocity the settling spring receives. `0` starts from rest, `1` requests a continuous release handoff, and values above `1` amplify release energy. The endpoint boundary can resist that energy when it would add more exterior travel than `overdrag` permits.
+`velocityTransfer` changes only how much mapped finger velocity the settling spring receives. `0` starts from rest, `1` requests a continuous release handoff, and values above `1` amplify release energy.
 
-`overdrag` is measured in points on iOS and density-independent pixels on Android. It controls gesture-derived endpoint travel and defaults to `4`; `0` creates a hard, immediately reversible direct boundary. An underdamped spring's own natural overshoot is not clipped or rewritten by this setting.
+`overdrag` is measured in points on iOS and density-independent pixels on Android. It controls gesture-derived endpoint travel and defaults to `4`; `0` creates a hard, immediately reversible direct boundary. It does not cap or rewrite post-release spring motion.
 
 Each admitted gesture snapshots the complete interaction configuration, including its release policy. Programmatic settling takes a fresh snapshot when it begins. Updating `interaction` never changes a gesture or settle already in progress; layout, pause, and resume retain that interaction's snapshot. Gesture input, target choice, settling, interruption, and retargeting remain native on Paper and Fabric.
 

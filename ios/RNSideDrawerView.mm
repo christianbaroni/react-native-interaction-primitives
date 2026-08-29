@@ -1027,10 +1027,8 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
     CGPoint location = [_scrollView.panGestureRecognizer locationInView:self];
     [_hapticFeedback triggerAtLocation:location];
   }
-  CGFloat targetPosition = targetOpen ? _laidOutDrawerWidth : 0;
   CGFloat transferredVelocity = revealVelocity * _activeInteraction.releaseVelocityTransfer;
-  _releaseRevealVelocity = rnsidedrawer::limitReleaseVelocity(
-      _reveal, transferredVelocity, targetPosition, _activeInteraction.spring, _activeInteraction.overdrag);
+  _releaseRevealVelocity = isfinite(transferredVelocity) ? transferredVelocity : 0;
   _targetOpen = targetOpen;
   _settlingSource = RNSideDrawerSettlingSourceRelease;
   _phase = RNSideDrawerPhaseSettling;

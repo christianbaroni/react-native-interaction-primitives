@@ -61,6 +61,19 @@ describe('Android native view ownership', () => {
 });
 
 describe('Android drawer transition ownership', () => {
+  it('hands finite release velocity directly to the spring', () => {
+    const interaction = source('RNSideDrawerInteraction.kt');
+    const root = source('RNSideDrawerView.kt');
+    const release = between(root, 'private fun startReleaseTransition(', 'private fun startTransition(');
+
+    expect(release).toContain('presentedVelocity * interaction.releaseVelocityTransfer');
+    expect(release).toContain('if (transferredVelocity.isFinite()) transferredVelocity else 0.0');
+    expect(release).not.toContain('overdrag');
+    expect(release).toContain('startTransition(nextOpen, SettlingSource.Release, true, initialVelocity, interaction)');
+    expect(interaction).not.toContain('limitSideDrawerReleaseVelocity');
+    expect(interaction).not.toContain('maximumOutwardDistance');
+  });
+
   it('keeps touch pauses on the last choreographer-owned frame', () => {
     const root = source('RNSideDrawerView.kt');
     const pause = between(root, 'private fun pauseTransitionForTouch() {', 'private fun resumePausedTransition()');
