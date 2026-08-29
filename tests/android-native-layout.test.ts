@@ -59,3 +59,15 @@ describe('Android native view ownership', () => {
     expect(root).toContain('clipToPadding = true');
   });
 });
+
+describe('Android drawer transition ownership', () => {
+  it('keeps touch pauses on the last choreographer-owned frame', () => {
+    const root = source('RNSideDrawerView.kt');
+    const pause = between(root, 'private fun pauseTransitionForTouch() {', 'private fun resumePausedTransition()');
+
+    expect(pause).toContain('stopTransitionAnimation()');
+    expect(pause).toContain('transitionPausedForTouch = true');
+    expect(pause).not.toContain('synchronizeTransition()');
+    expect(pause).not.toContain('updateTransitionFrame(');
+  });
+});

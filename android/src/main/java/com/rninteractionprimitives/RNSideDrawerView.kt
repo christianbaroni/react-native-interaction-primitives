@@ -811,8 +811,6 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
 
     private fun pauseTransitionForTouch() {
         if (phase != Phase.Settling || transitionPausedForTouch) return
-        synchronizeTransition()
-        if (phase != Phase.Settling) return
         stopTransitionAnimation()
         transitionVelocityPxPerSecond = 0.0
         transitionPausedForTouch = true

@@ -62,7 +62,8 @@ typedef NS_ENUM(NSInteger, RNSideDrawerSettlingSource) {
                         initialVelocity:(CGFloat)initialVelocity;
 - (void)startTransitionAnimator;
 - (CGFloat)stopTransitionAtCurrentPosition;
-- (void)pauseActiveTransition;
+- (void)requestTransitionPause;
+- (void)restoreTransitionLayerTiming;
 - (void)completeTransitionWithDrawerOpen:(BOOL)open;
 - (void)advanceTransitionToTime:(CFTimeInterval)time;
 
@@ -91,6 +92,7 @@ typedef NS_ENUM(NSInteger, RNSideDrawerSettlingSource) {
 - (void)startPresentationDisplayLink;
 - (void)stopPresentationDisplayLink;
 - (void)refreshPresentationDisplayLink;
+- (void)samplePresentedTransition:(CADisplayLink *)displayLink;
 - (void)publishProgressForReveal:(CGFloat)reveal;
 @end
 
@@ -130,7 +132,7 @@ typedef NS_ENUM(NSInteger, RNSideDrawerSettlingSource) {
   CADisplayLink *_presentationDisplayLink;
   UIScreen *_presentationDisplayScreen;
   BOOL _transitionActive;
-  BOOL _transitionPausedForTracking;
+  BOOL _transitionPauseRequested;
   CGFloat _transitionVelocity;
   CFTimeInterval _lastTransitionTime;
 
@@ -255,7 +257,7 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
   [super layoutSubviews];
   BOOL firstLayout = !_hasLaidOut;
   BOOL resumeSettling = _phase == RNSideDrawerPhaseSettling;
-  BOOL resumePaused = _transitionPausedForTracking;
+  BOOL resumePaused = _transitionPauseRequested;
   BOOL targetOpen = _targetOpen;
   CGFloat resumeVelocity = resumeSettling ? [self stopTransitionAtCurrentPosition] : 0;
   CGFloat previousDrawerWidth = _laidOutDrawerWidth;
@@ -308,7 +310,7 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
   if (resumeSettling) {
     if (resumePaused) {
       _transitionActive = YES;
-      _transitionPausedForTracking = YES;
+      _transitionPauseRequested = YES;
       _transitionVelocity = 0;
       [self startPresentationDisplayLink];
     } else {
@@ -713,6 +715,7 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
 - (void)startTransitionAnimator
 {
   BOOL targetOpen = _targetOpen;
+  [self restoreTransitionLayerTiming];
   [self prepareViewsForTransition];
   CGFloat targetPosition = targetOpen ? _laidOutDrawerWidth : 0;
   CGFloat distance = targetPosition - _reveal;
@@ -761,13 +764,13 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
   _reveal = reveal;
   if (fabs(reveal - targetPosition) <= pixelTolerance) {
     _transitionVelocity = 0;
-    _transitionPausedForTracking = NO;
+    _transitionPauseRequested = NO;
     _transitionActive = NO;
     return NO;
   }
   _transitionVelocity = resolvedVelocity;
   _lastTransitionTime = CACurrentMediaTime();
-  _transitionPausedForTracking = NO;
+  _transitionPauseRequested = NO;
   _transitionActive = YES;
   return YES;
 }
@@ -775,41 +778,54 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
 - (CGFloat)stopTransitionAtCurrentPosition
 {
   if (!_transitionActive) return 0;
-  if (!_scrollView.tracking && !_transitionPausedForTracking) [self advanceTransitionToTime:CACurrentMediaTime()];
+  CALayer *layer = _contentPresentationView.layer;
+  BOOL layerPaused = layer.speed == 0;
+  CGFloat pausedReveal = layerPaused ? [self presentedReveal] : 0;
+  if (!_scrollView.tracking && !_transitionPauseRequested) [self advanceTransitionToTime:CACurrentMediaTime()];
   CGFloat velocity = _transitionVelocity;
   [_transitionAnimator stopAnimation:YES];
   _transitionAnimator = nil;
-  _reveal = [self revealFromContentPosition];
+  if (layerPaused) [self restoreTransitionLayerTiming];
+  _reveal = layerPaused ? pausedReveal : [self revealFromContentPosition];
   _transitionActive = NO;
-  _transitionPausedForTracking = NO;
+  _transitionPauseRequested = NO;
   [self stopPresentationDisplayLink];
   [self applyPresentationAtProgress:[self revealProgress]];
   return velocity;
 }
 
-- (void)pauseActiveTransition
+- (void)requestTransitionPause
 {
-  if (!_transitionActive || _transitionPausedForTracking) return;
-  (void)[self stopTransitionAtCurrentPosition];
-  _transitionVelocity = 0;
-  _transitionPausedForTracking = YES;
-  _transitionActive = YES;
-  _lastTransitionTime = CACurrentMediaTime();
+  if (!_transitionActive || _transitionPauseRequested) return;
+  _transitionPauseRequested = YES;
   [self startPresentationDisplayLink];
+}
+
+- (void)restoreTransitionLayerTiming
+{
+  CALayer *layer = _contentPresentationView.layer;
+  if (layer.speed != 0) return;
+  [CATransaction begin];
+  [CATransaction setDisableActions:YES];
+  layer.speed = 1;
+  layer.timeOffset = 0;
+  layer.beginTime = 0;
+  [CATransaction commit];
 }
 
 - (void)handleContactBegin
 {
   [_hapticFeedback prepare];
-  [self pauseActiveTransition];
+  [self requestTransitionPause];
 }
 
 - (void)completeTransitionWithDrawerOpen:(BOOL)open
 {
+  _transitionActive = NO;
+  _transitionPauseRequested = NO;
   [_transitionAnimator stopAnimation:YES];
   _transitionAnimator = nil;
-  _transitionActive = NO;
-  _transitionPausedForTracking = NO;
+  [self restoreTransitionLayerTiming];
   [self stopPresentationDisplayLink];
   _transitionVelocity = 0;
   _open = open;
@@ -1263,7 +1279,7 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
 - (void)refreshPresentationDisplayLink
 {
   BOOL active = _transitionActive && _phase == RNSideDrawerPhaseSettling;
-  BOOL needed = _transitionPausedForTracking || _progressEventsEnabled || _motion.hasInterpolations();
+  BOOL needed = _transitionPauseRequested || _progressEventsEnabled || _motion.hasInterpolations();
   if (active && needed) {
     [self startPresentationDisplayLink];
   } else {
@@ -1273,7 +1289,6 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
 
 - (void)samplePresentedTransition:(CADisplayLink *)displayLink
 {
-  (void)displayLink;
   if (_presentationDisplayScreen != [self currentScreen]) {
     [self startPresentationDisplayLink];
     return;
@@ -1282,12 +1297,28 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
     [self stopPresentationDisplayLink];
     return;
   }
-  if (_transitionPausedForTracking) {
+  if (_transitionPauseRequested) {
+    CALayer *layer = _contentPresentationView.layer;
+    if (_transitionAnimator != nil && layer.speed != 0) {
+      CFTimeInterval pausedTime = [layer convertTime:displayLink.targetTimestamp fromLayer:nil];
+      [CATransaction begin];
+      [CATransaction setDisableActions:YES];
+      layer.speed = 0;
+      layer.timeOffset = pausedTime;
+      [CATransaction commit];
+      _transitionVelocity = 0;
+      return;
+    }
+    if (layer.speed == 0) {
+      (void)[self stopTransitionAtCurrentPosition];
+      _transitionActive = YES;
+      _transitionPauseRequested = YES;
+      [self startPresentationDisplayLink];
+      return;
+    }
     if (_scrollView.tracking) return;
     BOOL targetOpen = _targetOpen;
-    _transitionActive = NO;
-    _transitionPausedForTracking = NO;
-    [self stopPresentationDisplayLink];
+    (void)[self stopTransitionAtCurrentPosition];
     if ([self prepareTransitionWithTargetOpen:targetOpen fromReveal:_reveal initialVelocity:0]) {
       [self startTransitionAnimator];
     } else {
@@ -1299,6 +1330,8 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
     [self stopPresentationDisplayLink];
     return;
   }
+
+  (void)displayLink;
   CGFloat reveal = [self presentedReveal];
   if (_motion.hasInterpolations()) {
     [CATransaction begin];
