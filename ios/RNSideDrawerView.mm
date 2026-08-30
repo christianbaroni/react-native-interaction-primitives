@@ -917,7 +917,6 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
 - (void)scrollViewWillBeginDragging:(UIScrollView *)scrollView
 {
   (void)scrollView;
-  [_scrollView cancelReactTouchesForActivePan];
   _suppressCurrentDragRelease = NO;
   BOOL interruptedTargetOpen = _phase == RNSideDrawerPhaseSettling ? _targetOpen : _open;
   _gestureOriginOpen = interruptedTargetOpen;

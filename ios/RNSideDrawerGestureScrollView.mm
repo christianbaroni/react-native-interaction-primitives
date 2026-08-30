@@ -76,17 +76,27 @@ void cancelTouchedScrollViewPans(UIView *touchedView, UIScrollView *drawerScroll
   }
 }
 
+void cancelReactTouches(UIGestureRecognizer *touchHandler)
+{
+  if (!touchHandler.enabled) return;
+
+  if ([touchHandler isKindOfClass:RCTTouchHandler.class]) {
+    [(RCTTouchHandler *)touchHandler cancel];
+  } else {
+    touchHandler.enabled = NO;
+    touchHandler.enabled = YES;
+  }
+}
+
 } // namespace
 
 @implementation RNSideDrawerGestureScrollView {
   __weak UIView *_touchedView;
-  __weak UIGestureRecognizer *_reactTouchHandler;
 }
 
 - (BOOL)touchesShouldBegin:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event inContentView:(UIView *)view
 {
   _touchedView = view;
-  _reactTouchHandler = findReactTouchHandler(view);
   if (self.didBeginContact != nil) self.didBeginContact();
   return [super touchesShouldBegin:touches withEvent:event inContentView:view];
 }
@@ -106,11 +116,14 @@ void cancelTouchedScrollViewPans(UIView *touchedView, UIScrollView *drawerScroll
   const BOOL drawerCanMove = self.canBeginDrawerPan([self.panGestureRecognizer velocityInView:self]);
   const BOOL descendantCanScroll = drawerCanMove &&
       touchedDescendantCanScrollHorizontally(_touchedView, self, self.panGestureRecognizer);
-  if (drawerCanMove && !descendantCanScroll) cancelTouchedScrollViewPans(_touchedView, self);
+  const BOOL accepted = drawerCanMove && !descendantCanScroll;
+  if (accepted) {
+    // React's touch handler cannot be prevented by a descendant pan; cancel it before admission.
+    cancelReactTouches(findReactTouchHandler(_touchedView != nil ? _touchedView : self));
+    cancelTouchedScrollViewPans(_touchedView, self);
+  }
 
   _touchedView = nil;
-  const BOOL accepted = drawerCanMove && !descendantCanScroll;
-  if (!accepted) _reactTouchHandler = nil;
   return accepted;
 }
 
@@ -125,20 +138,6 @@ void cancelTouchedScrollViewPans(UIView *touchedView, UIScrollView *drawerScroll
     return isDescendantScrollViewPan(gestureRecognizer, self);
   }
   return NO;
-}
-
-- (void)cancelReactTouchesForActivePan
-{
-  UIGestureRecognizer *touchHandler = _reactTouchHandler;
-  _reactTouchHandler = nil;
-  if (!touchHandler.enabled) return;
-
-  if ([touchHandler isKindOfClass:RCTTouchHandler.class]) {
-    [(RCTTouchHandler *)touchHandler cancel];
-  } else {
-    touchHandler.enabled = NO;
-    touchHandler.enabled = YES;
-  }
 }
 
 @end
