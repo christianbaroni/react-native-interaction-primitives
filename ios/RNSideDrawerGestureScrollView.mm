@@ -118,7 +118,8 @@ void cancelReactTouches(UIGestureRecognizer *touchHandler)
       touchedDescendantCanScrollHorizontally(_touchedView, self, self.panGestureRecognizer);
   const BOOL accepted = drawerCanMove && !descendantCanScroll;
   if (accepted) {
-    // React's touch handler cannot be prevented by a descendant pan; cancel it before admission.
+    // A descendant pan cannot prevent React's touch handler; cancel the React touch
+    // when accepting the drawer pan.
     cancelReactTouches(findReactTouchHandler(_touchedView != nil ? _touchedView : self));
     cancelTouchedScrollViewPans(_touchedView, self);
   }

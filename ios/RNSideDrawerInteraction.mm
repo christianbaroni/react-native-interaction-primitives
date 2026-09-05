@@ -1,6 +1,6 @@
-#import "RNSideDrawerInteraction.h"
+#include "RNSideDrawerInteraction.h"
 
-#import <UIKit/UIKit.h>
+#include <UIKit/UIKit.h>
 
 #include <algorithm>
 #include <cmath>
@@ -19,6 +19,15 @@ CGFloat clamp(CGFloat value, CGFloat minimum, CGFloat maximum) noexcept
   return std::min(maximum, std::max(minimum, value));
 }
 
+CGFloat peakDisplacementPerVelocity(CGFloat naturalFrequency, CGFloat peakDecay) noexcept
+{
+  if (!std::isfinite(naturalFrequency) || naturalFrequency <= 0 ||
+      !std::isfinite(peakDecay) || peakDecay < 0) {
+    return 0;
+  }
+  return std::exp(-peakDecay - std::log(naturalFrequency));
+}
+
 rnsidedrawer::Spring makeSpring(CGFloat mass, CGFloat stiffness, CGFloat damping) noexcept
 {
   const CGFloat naturalFrequencySquared = stiffness / mass;
@@ -35,30 +44,62 @@ rnsidedrawer::Spring makeSpring(CGFloat mass, CGFloat stiffness, CGFloat damping
         naturalFrequencySquared,
         dampingRate,
         0,
+        peakDisplacementPerVelocity(naturalFrequency, 1),
         rnsidedrawer::DampingType::CriticallyDamped};
   }
 
+  const CGFloat dampingRatio = dampingRate / naturalFrequency;
+
   if (dampingRate < naturalFrequency) {
-    const CGFloat ratio = dampingRate / naturalFrequency;
+    const CGFloat normalizedResponse =
+        std::sqrt(std::max<CGFloat>(0, (1 - dampingRatio) * (1 + dampingRatio)));
+    const CGFloat responseRate = naturalFrequency * normalizedResponse;
+    const CGFloat peakDecay =
+        dampingRatio * std::atan2(normalizedResponse, dampingRatio) / normalizedResponse;
     return {
         mass,
         stiffness,
         damping,
         naturalFrequencySquared,
         dampingRate,
-        naturalFrequency * std::sqrt(std::max<CGFloat>(0, 1 - ratio * ratio)),
+        responseRate,
+        peakDisplacementPerVelocity(naturalFrequency, peakDecay),
         rnsidedrawer::DampingType::Underdamped};
   }
 
-  const CGFloat ratio = naturalFrequency / dampingRate;
+  const CGFloat normalizedResponse =
+      std::sqrt(std::max<CGFloat>(0, dampingRatio - 1)) *
+      std::sqrt(std::max<CGFloat>(0, dampingRatio + 1));
+  const CGFloat responseRate = naturalFrequency * normalizedResponse;
+  const CGFloat peakDecay =
+      (dampingRatio / normalizedResponse) * std::acosh(dampingRatio);
   return {
       mass,
       stiffness,
       damping,
       naturalFrequencySquared,
       dampingRate,
-      dampingRate * std::sqrt(std::max<CGFloat>(0, 1 - ratio * ratio)),
+      responseRate,
+      peakDisplacementPerVelocity(naturalFrequency, peakDecay),
       rnsidedrawer::DampingType::Overdamped};
+}
+
+bool springIsRepresentable(const rnsidedrawer::Spring &spring) noexcept
+{
+  if (!std::isfinite(spring.mass) || spring.mass <= 0 ||
+      !std::isfinite(spring.stiffness) || spring.stiffness <= 0 ||
+      !std::isfinite(spring.damping) || spring.damping <= 0 ||
+      !std::isfinite(spring.naturalFrequencySquared) || spring.naturalFrequencySquared <= 0 ||
+      !std::isfinite(spring.dampingRate) || spring.dampingRate <= 0 ||
+      !std::isfinite(spring.peakDisplacementPerVelocity) || spring.peakDisplacementPerVelocity <= 0) {
+    return false;
+  }
+  if (spring.dampingType == rnsidedrawer::DampingType::CriticallyDamped) {
+    return spring.responseRate == 0;
+  }
+  if (!std::isfinite(spring.responseRate) || spring.responseRate <= 0) return false;
+  return spring.dampingType != rnsidedrawer::DampingType::Overdamped ||
+      std::isfinite(spring.dampingRate + spring.responseRate);
 }
 
 const rnsidedrawer::Spring kDefaultSpring =
@@ -66,20 +107,28 @@ const rnsidedrawer::Spring kDefaultSpring =
 
 rnsidedrawer::Spring resolveSpring(CGFloat mass, CGFloat stiffness, CGFloat damping) noexcept
 {
-  if (!std::isfinite(mass) || mass <= 0 || !std::isfinite(stiffness) || stiffness <= 0 ||
-      !std::isfinite(damping) || damping <= 0) {
-    return kDefaultSpring;
-  }
+  const CGFloat resolvedMass =
+      std::isfinite(mass) && mass > 0 ? mass : kDefaultSpringMass;
+  const CGFloat resolvedStiffness =
+      std::isfinite(stiffness) && stiffness > 0 ? stiffness : kDefaultSpringStiffness;
+  const CGFloat resolvedDamping =
+      std::isfinite(damping) && damping > 0 ? damping : kDefaultSpringDamping;
 
-  const CGFloat naturalFrequencySquared = stiffness / mass;
-  const CGFloat dampingRate = (damping / 2) / mass;
+  const CGFloat naturalFrequencySquared = resolvedStiffness / resolvedMass;
+  const CGFloat dampingRate = (resolvedDamping / 2) / resolvedMass;
+  const CGFloat naturalFrequency = std::sqrt(naturalFrequencySquared);
+  const CGFloat dampingRatio = dampingRate / naturalFrequency;
 
   if (!std::isfinite(naturalFrequencySquared) || naturalFrequencySquared <= 0 ||
-      !std::isfinite(dampingRate) || dampingRate <= 0) {
+      !std::isfinite(dampingRate) || dampingRate <= 0 ||
+      !std::isfinite(naturalFrequency) || naturalFrequency <= 0 ||
+      !std::isfinite(dampingRatio) || dampingRatio <= 0) {
     return kDefaultSpring;
   }
 
-  return makeSpring(mass, stiffness, damping);
+  const rnsidedrawer::Spring spring =
+      makeSpring(resolvedMass, resolvedStiffness, resolvedDamping);
+  return springIsRepresentable(spring) ? spring : kDefaultSpring;
 }
 
 } // namespace
@@ -108,6 +157,15 @@ Interaction resolveInteraction(InteractionConfiguration configuration) noexcept
       configuration.releaseVelocityTransfer};
 }
 
+Spring criticallyDampedSpring(const Spring &spring) noexcept
+{
+  if (spring.dampingType != DampingType::Overdamped) return spring;
+  return makeSpring(
+      spring.mass,
+      spring.stiffness,
+      2 * spring.mass * std::sqrt(spring.naturalFrequencySquared));
+}
+
 SpringState evaluateSpring(
     const Spring &spring,
     CGFloat initialDisplacement,
@@ -116,75 +174,146 @@ SpringState evaluateSpring(
 {
   if (elapsed <= 0) return {initialDisplacement, initialVelocity};
 
-  if (spring.dampingType == DampingType::Underdamped) {
-    const CGFloat angularFrequency = spring.responseRate;
-    const CGFloat sineCoefficient =
-        (initialVelocity + spring.dampingRate * initialDisplacement) / angularFrequency;
-    const CGFloat angle = angularFrequency * elapsed;
-    const CGFloat decay = std::exp(-spring.dampingRate * elapsed);
-    const CGFloat oscillation =
-        initialDisplacement * std::cos(angle) + sineCoefficient * std::sin(angle);
-    const CGFloat oscillationVelocity =
-        -initialDisplacement * angularFrequency * std::sin(angle) +
-        sineCoefficient * angularFrequency * std::cos(angle);
-    return {
-        decay * oscillation,
-        decay * (oscillationVelocity - spring.dampingRate * oscillation)};
-  }
+  // Exact basis functions for x'' + 2αx' + ω₀²x = 0. Expressing the
+  // solution through its unit-velocity response avoids the large opposing
+  // modal coefficients that become ill-conditioned near critical damping
+  // and can overflow for otherwise representable overdamped springs.
+  CGFloat phaseResponse;
+  CGFloat unitVelocityResponse;
 
-  if (spring.dampingType == DampingType::Overdamped) {
+  if (spring.dampingType == DampingType::Underdamped) {
+    const CGFloat angle = spring.responseRate * elapsed;
+    const CGFloat decay = std::exp(-spring.dampingRate * elapsed);
+    const CGFloat sinc = angle == 0 ? 1 : std::sin(angle) / angle;
+    phaseResponse = decay * std::cos(angle);
+    unitVelocityResponse = decay * elapsed * sinc;
+  } else if (spring.dampingType == DampingType::Overdamped) {
     const CGFloat slowRate =
         -spring.naturalFrequencySquared / (spring.dampingRate + spring.responseRate);
-    const CGFloat fastRate = -(spring.dampingRate + spring.responseRate);
-    const CGFloat slowCoefficient =
-        (initialVelocity - fastRate * initialDisplacement) / (slowRate - fastRate);
-    const CGFloat fastCoefficient = initialDisplacement - slowCoefficient;
     const CGFloat slowDecay = std::exp(slowRate * elapsed);
-    const CGFloat fastDecay = std::exp(fastRate * elapsed);
-    return {
-        slowCoefficient * slowDecay + fastCoefficient * fastDecay,
-        slowRate * slowCoefficient * slowDecay + fastRate * fastCoefficient * fastDecay};
+    const CGFloat angle = spring.responseRate * elapsed;
+    const CGFloat relativeFastDecay = std::exp(-2 * angle);
+    phaseResponse = slowDecay * (1 + relativeFastDecay) / 2;
+    unitVelocityResponse = angle == 0
+        ? slowDecay * elapsed
+        : slowDecay * -std::expm1(-2 * angle) / (2 * spring.responseRate);
+  } else {
+    const CGFloat decay = std::exp(-spring.dampingRate * elapsed);
+    phaseResponse = decay;
+    unitVelocityResponse = decay * elapsed;
   }
 
-  const CGFloat coefficient = initialVelocity + spring.dampingRate * initialDisplacement;
-  const CGFloat decay = std::exp(-spring.dampingRate * elapsed);
-
   return {
-      (initialDisplacement + coefficient * elapsed) * decay,
-      (initialVelocity - spring.dampingRate * coefficient * elapsed) * decay};
+      initialDisplacement * (phaseResponse + spring.dampingRate * unitVelocityResponse) +
+          initialVelocity * unitVelocityResponse,
+      initialVelocity * (phaseResponse - spring.dampingRate * unitVelocityResponse) -
+          spring.naturalFrequencySquared * initialDisplacement * unitVelocityResponse};
+}
+
+CGFloat limitReleaseVelocity(
+    const Spring &spring,
+    CGFloat velocity,
+    CGFloat limitDistance) noexcept
+{
+  if (!std::isfinite(velocity)) return 0;
+
+  if (velocity == 0 || !std::isfinite(limitDistance) || limitDistance <= 0 ||
+      !std::isfinite(spring.peakDisplacementPerVelocity) ||
+      spring.peakDisplacementPerVelocity <= 0) {
+    return velocity;
+  }
+
+  const CGFloat velocityAtLimitDistance =
+      limitDistance / spring.peakDisplacementPerVelocity;
+  if (!std::isfinite(velocityAtLimitDistance)) return velocity;
+  if (velocityAtLimitDistance == 0) return 0;
+
+  const CGFloat normalizedVelocity = std::abs(velocity) / velocityAtLimitDistance;
+  if (normalizedVelocity == 0) return velocity;
+
+  constexpr CGFloat kCubicInputScale = 2.598076211353316;
+  constexpr CGFloat kCubicOutputScale = 1.154700538379252;
+
+  // Exact positive root of u² = s² + s⁶. Its cubic asymptote avoids
+  // squaring overflow without introducing a threshold in the curve.
+  const CGFloat squaredVelocity = normalizedVelocity * normalizedVelocity;
+  if (squaredVelocity == 0) return velocity;
+  const CGFloat scaledSquare = kCubicInputScale * squaredVelocity;
+  CGFloat limitedMagnitude;
+  if (std::isfinite(scaledSquare)) {
+    const CGFloat normalizedLimit = std::sqrt(
+        kCubicOutputScale *
+        std::sinh(std::asinh(scaledSquare) / 3));
+    limitedMagnitude = velocityAtLimitDistance * normalizedLimit;
+  } else if (std::isfinite(normalizedVelocity)) {
+    limitedMagnitude = velocityAtLimitDistance * std::cbrt(normalizedVelocity);
+  } else {
+    const CGFloat cubeRootScale = std::cbrt(velocityAtLimitDistance);
+    limitedMagnitude = std::cbrt(std::abs(velocity)) * cubeRootScale * cubeRootScale;
+  }
+  return std::copysign(std::min(limitedMagnitude, std::abs(velocity)), velocity);
+}
+
+WidthChangeState remapStateForWidthChange(
+    CGFloat position,
+    CGFloat velocity,
+    CGFloat oldWidth,
+    CGFloat newWidth) noexcept
+{
+  CGFloat remappedPosition = position;
+  if (position > oldWidth) {
+    remappedPosition = newWidth + position - oldWidth;
+  } else if (position >= 0 && oldWidth > 0) {
+    remappedPosition = position / oldWidth * newWidth;
+  }
+
+  CGFloat velocityScale = 1;
+  if (oldWidth > 0 && position >= 0 && position <= oldWidth) {
+    const bool exitsThroughLowerBound = position == 0 && velocity < 0;
+    const bool exitsThroughUpperBound = position == oldWidth && velocity > 0;
+    if (!exitsThroughLowerBound && !exitsThroughUpperBound) {
+      velocityScale = newWidth / oldWidth;
+    }
+  }
+
+  const CGFloat remappedVelocity = velocity * velocityScale;
+  return {
+      remappedPosition,
+      std::isfinite(remappedVelocity) ? remappedVelocity : 0};
 }
 
 CGFloat remapPositionForWidthChange(CGFloat position, CGFloat oldWidth, CGFloat newWidth) noexcept
 {
-  if (position < 0) return position;
-  if (position > oldWidth) return newWidth + position - oldWidth;
-  return oldWidth > 0 ? position / oldWidth * newWidth : position;
+  return remapStateForWidthChange(position, 0, oldWidth, newWidth).position;
 }
 
 CGFloat resistedPosition(
     CGFloat unconstrainedPosition,
     CGFloat lowerBound,
     CGFloat upperBound,
-    CGFloat maximumOverdrag) noexcept
+    CGFloat resistanceDistance) noexcept
 {
-  if (maximumOverdrag <= 0) return clamp(unconstrainedPosition, lowerBound, upperBound);
+  if (resistanceDistance <= 0) return clamp(unconstrainedPosition, lowerBound, upperBound);
+
   if (unconstrainedPosition < lowerBound) {
-    return lowerBound + maximumOverdrag * std::tanh((unconstrainedPosition - lowerBound) / maximumOverdrag);
+    return lowerBound + resistanceDistance * std::asinh((unconstrainedPosition - lowerBound) / resistanceDistance);
   }
+
   if (unconstrainedPosition <= upperBound) return unconstrainedPosition;
-  return upperBound + maximumOverdrag * std::tanh((unconstrainedPosition - upperBound) / maximumOverdrag);
+
+  return upperBound + resistanceDistance * std::asinh((unconstrainedPosition - upperBound) / resistanceDistance);
 }
 
 CGFloat resistedVelocity(
     CGFloat unconstrainedPosition,
     CGFloat lowerBound,
     CGFloat upperBound,
-    CGFloat maximumOverdrag,
+    CGFloat resistanceDistance,
     CGFloat velocity) noexcept
 {
   if (!std::isfinite(velocity)) return 0;
 
-  if (maximumOverdrag <= 0) {
+  if (resistanceDistance <= 0) {
     if ((unconstrainedPosition <= lowerBound && velocity < 0) ||
         (unconstrainedPosition >= upperBound && velocity > 0)) {
       return 0;
@@ -195,8 +324,8 @@ CGFloat resistedVelocity(
   if (unconstrainedPosition >= lowerBound && unconstrainedPosition <= upperBound) return velocity;
 
   const CGFloat boundary = unconstrainedPosition < lowerBound ? lowerBound : upperBound;
-  const CGFloat normalizedDistance = std::tanh((unconstrainedPosition - boundary) / maximumOverdrag);
-  return velocity * (1 - normalizedDistance * normalizedDistance);
+  const CGFloat normalizedDistance = (unconstrainedPosition - boundary) / resistanceDistance;
+  return velocity / std::hypot(1, normalizedDistance);
 }
 
 bool releaseShouldOpen(

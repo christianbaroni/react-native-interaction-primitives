@@ -89,10 +89,10 @@ export type SideDrawerInteraction = Readonly<{
     openThreshold?: number;
     /** Relative influence of release velocity on endpoint selection. */
     velocitySensitivity?: number;
-    /** Scale applied to release velocity before the settling spring begins. */
+    /** Scale applied to finger velocity before extreme values are smoothly reduced. */
     velocityTransfer?: number;
   }>;
-  /** Maximum resisted endpoint travel during direct manipulation, in points or density-independent pixels. */
+  /** Distance scale for progressive overdrag resistance, in points or density-independent pixels. */
   overdrag?: number;
 }>;
 

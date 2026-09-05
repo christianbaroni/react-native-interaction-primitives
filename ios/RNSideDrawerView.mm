@@ -10,7 +10,6 @@
 
 #import <React/UIView+React.h>
 #import <QuartzCore/QuartzCore.h>
-#include <float.h>
 #import <math.h>
 
 typedef NS_ENUM(NSInteger, RNSideDrawerPhase) {
@@ -60,16 +59,19 @@ typedef NS_ENUM(NSInteger, RNSideDrawerSettlingSource) {
 - (BOOL)prepareTransitionWithTargetOpen:(BOOL)targetOpen
                              fromReveal:(CGFloat)reveal
                         initialVelocity:(CGFloat)initialVelocity;
-- (void)startTransitionAnimator;
+- (void)startPreparedTransition;
+- (void)scheduleTransitionAnimatorToPosition:(CGFloat)targetPosition
+                             fromStateAtTime:(CFTimeInterval)stateTime;
 - (CGFloat)stopTransitionAtCurrentPosition;
 - (void)requestTransitionInterruption;
 - (void)restoreTransitionLayerTiming;
 - (void)completeTransitionWithDrawerOpen:(BOOL)open;
-- (void)advanceTransitionToTime:(CFTimeInterval)time;
+- (void)advanceTransitionStateToTime:(CFTimeInterval)time;
+- (BOOL)alignTransitionStateTimeWithAnimator;
 
 - (BOOL)canBeginPanWithVelocity:(CGPoint)velocity;
 - (void)handleContactBegin;
-- (void)beginAdmittedDrag;
+- (void)beginAcceptedDrag;
 - (void)handlePanGesture:(UIPanGestureRecognizer *)panGestureRecognizer;
 - (void)updateDragFromPanGesture;
 - (CGFloat)dragTranslation;
@@ -83,7 +85,6 @@ typedef NS_ENUM(NSInteger, RNSideDrawerSettlingSource) {
 
 - (CGFloat)revealProgress;
 - (CGFloat)presentedReveal;
-- (CGFloat)revealFromContentPosition;
 - (void)alignFixedViewsToScrollOffset:(CGFloat)offset;
 - (void)positionContentForReveal:(CGFloat)reveal;
 - (void)applyPresentationAtProgress:(CGFloat)progress;
@@ -97,7 +98,7 @@ typedef NS_ENUM(NSInteger, RNSideDrawerSettlingSource) {
 - (void)startPresentationDisplayLink;
 - (void)stopPresentationDisplayLink;
 - (void)refreshPresentationDisplayLink;
-- (void)samplePresentedTransition:(CADisplayLink *)displayLink;
+- (void)handlePresentationDisplayLink:(CADisplayLink *)displayLink;
 - (void)publishProgressForReveal:(CGFloat)reveal;
 @end
 
@@ -140,23 +141,38 @@ typedef NS_ENUM(NSInteger, RNSideDrawerSettlingSource) {
   CADisplayLink *_presentationDisplayLink;
   UIScreen *_presentationDisplayScreen;
   BOOL _transitionActive;
+  BOOL _transitionTimeAlignmentPending;
   BOOL _transitionInterruptionPending;
   CGFloat _interruptionScrollOffset;
   CGFloat _transitionVelocity;
-  CFTimeInterval _lastTransitionTime;
+  CFTimeInterval _transitionStateTime;
 
   rnsidedrawer::InteractionConfiguration _configuredInteraction;
   rnsidedrawer::Interaction _activeInteraction;
-  rnsidedrawer::Interaction _admittedInteraction;
+  rnsidedrawer::Spring _transitionSpring;
   rnsidedrawer::Motion _motion;
 }
 
 static const rnsidedrawer::InteractionConfiguration kDefaultInteractionConfiguration =
     rnsidedrawer::defaultInteractionConfiguration();
 
+static constexpr CGFloat RNSideDrawerReleaseVelocityLimitDistance = 32;
+
 static CGFloat RNSideDrawerClamp(CGFloat value, CGFloat minimum, CGFloat maximum)
 {
   return MIN(maximum, MAX(minimum, value));
+}
+
+static rnsidedrawer::Spring RNSideDrawerSpringForCurrentOS(
+    const rnsidedrawer::Spring &spring)
+{
+  if (spring.dampingType != rnsidedrawer::DampingType::Overdamped) return spring;
+  if (@available(iOS 17.0, *)) return spring;
+
+  // UIKit before iOS 17 has no native timing representation for negative
+  // bounce. Use the equivalent critical spring consistently for rendering,
+  // analytic state transfer, and release-velocity limiting.
+  return rnsidedrawer::criticallyDampedSpring(spring);
 }
 
 static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
@@ -193,7 +209,7 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
     _overlayColor = UIColor.clearColor;
     _configuredInteraction = kDefaultInteractionConfiguration;
     _activeInteraction = rnsidedrawer::resolveInteraction(_configuredInteraction);
-    _admittedInteraction = _activeInteraction;
+    _transitionSpring = RNSideDrawerSpringForCurrentOS(_activeInteraction.spring);
     _drawerWidth = 0;
     _gestureEnabled = YES;
     _side = RNSideDrawerSideStart;
@@ -263,6 +279,29 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
   [self stopPresentationDisplayLink];
 }
 
+- (nullable UIView *)hitTest:(CGPoint)point withEvent:(nullable UIEvent *)event
+{
+  CALayer *contentLayer = _transitionActive
+      ? (_contentPresentationView.layer.presentationLayer ?: _contentPresentationView.layer)
+      : _contentPresentationView.layer;
+  if (contentLayer == _contentPresentationView.layer) return [super hitTest:point withEvent:event];
+
+  CGPoint scrollPoint = [_scrollView convertPoint:point fromView:self];
+  CALayer *scrollLayer = _scrollView.layer.presentationLayer ?: _scrollView.layer;
+  CGPoint contentPoint = [contentLayer convertPoint:scrollPoint fromLayer:scrollLayer];
+  if ([contentLayer containsPoint:contentPoint]) {
+    UIView *contentHit = [_contentPresentationView hitTest:contentPoint withEvent:event];
+    if (contentHit != nil) return contentHit;
+  }
+
+  if (_panelView != nil) {
+    CGPoint panelPoint = [_panelView convertPoint:scrollPoint fromView:_scrollView];
+    UIView *panelHit = [_panelView hitTest:panelPoint withEvent:event];
+    if (panelHit != nil) return panelHit;
+  }
+  return _scrollView;
+}
+
 - (void)layoutSubviews
 {
   [super layoutSubviews];
@@ -279,6 +318,16 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
 
   _openingDirection = [self resolvedOpeningDirection];
   _laidOutDrawerWidth = MAX(0, _drawerWidth);
+  rnsidedrawer::WidthChangeState resumedTransitionState = {
+      previousReveal,
+      resumeVelocity};
+  if (resumeSettling) {
+    resumedTransitionState = rnsidedrawer::remapStateForWidthChange(
+        previousReveal,
+        resumeVelocity,
+        previousDrawerWidth,
+        _laidOutDrawerWidth);
+  }
   _scrollView.frame = self.bounds;
 
   CGFloat width = self.bounds.size.width;
@@ -293,6 +342,8 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
 
   if (firstLayout) {
     _reveal = _initialOpen ? _laidOutDrawerWidth : 0;
+  } else if (resumeSettling) {
+    _reveal = resumedTransitionState.position;
   } else if (previousReveal < 0) {
     _reveal = previousReveal;
   } else if (previousReveal > previousDrawerWidth) {
@@ -333,8 +384,8 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
     } else {
       if ([self prepareTransitionWithTargetOpen:targetOpen
                                      fromReveal:_reveal
-                                initialVelocity:resumeVelocity]) {
-        [self startTransitionAnimator];
+                                initialVelocity:resumedTransitionState.velocity]) {
+        [self startPreparedTransition];
       } else {
         [self completeTransitionWithDrawerOpen:targetOpen];
       }
@@ -742,25 +793,40 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
     [self completeTransitionWithDrawerOpen:targetOpen];
     return;
   }
-  [self startTransitionAnimator];
+  [self startPreparedTransition];
 }
 
-- (void)startTransitionAnimator
+- (void)startPreparedTransition
 {
-  BOOL targetOpen = _targetOpen;
   [self restoreTransitionLayerTiming];
   [self prepareViewsForTransition];
+  [self refreshPresentationDisplayLink];
+}
 
-  CGFloat targetPosition = targetOpen ? _laidOutDrawerWidth : 0;
-  CGFloat distance = targetPosition - _reveal;
-  CGFloat normalizedVelocity = fabs(distance) > DBL_EPSILON ? _transitionVelocity / distance : 0;
+- (void)scheduleTransitionAnimatorToPosition:(CGFloat)targetPosition
+                             fromStateAtTime:(CFTimeInterval)stateTime
+{
+  BOOL targetOpen = _targetOpen;
+  CGFloat normalizedVelocity = _transitionVelocity / (targetPosition - _reveal);
 
-  const rnsidedrawer::Spring &spring = _activeInteraction.spring;
-  UISpringTimingParameters *timing = [[UISpringTimingParameters alloc]
-      initWithMass:spring.mass
-         stiffness:spring.stiffness
-           damping:spring.damping
-   initialVelocity:CGVectorMake(normalizedVelocity, 0)];
+  const rnsidedrawer::Spring &spring = _transitionSpring;
+  UISpringTimingParameters *timing = nil;
+  if (@available(iOS 17.0, *)) {
+    if (spring.dampingType == rnsidedrawer::DampingType::Overdamped) {
+      CGFloat naturalFrequency = sqrt(spring.naturalFrequencySquared);
+      timing = [[UISpringTimingParameters alloc]
+          initWithDuration:(2 * M_PI / naturalFrequency)
+                    bounce:(naturalFrequency / spring.dampingRate - 1)
+           initialVelocity:CGVectorMake(normalizedVelocity, 0)];
+    }
+  }
+  if (timing == nil) {
+    timing = [[UISpringTimingParameters alloc]
+        initWithMass:spring.mass
+           stiffness:spring.stiffness
+             damping:spring.damping
+     initialVelocity:CGVectorMake(normalizedVelocity, 0)];
+  }
   UIViewPropertyAnimator *animator = [[UIViewPropertyAnimator alloc] initWithDuration:0 timingParameters:timing];
   animator.interruptible = YES;
   animator.userInteractionEnabled = YES;
@@ -788,9 +854,14 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
     [strongSelf completeTransitionWithDrawerOpen:targetOpen];
   }];
   _transitionAnimator = animator;
+  _transitionStateTime = stateTime;
+  _transitionTimeAlignmentPending = YES;
   [self refreshPresentationDisplayLink];
-  [animator startAnimation];
-  _lastTransitionTime = CACurrentMediaTime();
+  // CADisplayLink timestamps and CACurrentMediaTime share Core Animation's
+  // absolute timebase; UIViewPropertyAnimator accepts a relative delay.
+  CFTimeInterval currentTime = CACurrentMediaTime();
+  CFTimeInterval delay = MAX(0, stateTime - currentTime);
+  [animator startAnimationAfterDelay:delay];
 }
 
 - (BOOL)prepareTransitionWithTargetOpen:(BOOL)targetOpen
@@ -798,13 +869,13 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
                         initialVelocity:(CGFloat)initialVelocity
 {
   CGFloat targetPosition = targetOpen ? _laidOutDrawerWidth : 0;
-  UIScreen *screen = [self currentScreen];
-  CGFloat pixelTolerance = 1.0 / MAX(screen.scale, 1.0);
   CGFloat resolvedVelocity = isfinite(initialVelocity) ? initialVelocity : 0;
   _targetOpen = targetOpen;
   _reveal = reveal;
+  _transitionSpring = RNSideDrawerSpringForCurrentOS(_activeInteraction.spring);
+  _transitionTimeAlignmentPending = NO;
 
-  if (fabs(reveal - targetPosition) <= pixelTolerance) {
+  if (reveal == targetPosition && resolvedVelocity == 0) {
     _transitionVelocity = 0;
     _transitionInterruptionPending = NO;
     _transitionActive = NO;
@@ -812,7 +883,7 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
   }
 
   _transitionVelocity = resolvedVelocity;
-  _lastTransitionTime = CACurrentMediaTime();
+  _transitionStateTime = CACurrentMediaTime();
   _transitionInterruptionPending = NO;
   _transitionActive = YES;
   return YES;
@@ -823,14 +894,19 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
   if (!_transitionActive) return 0;
   CALayer *layer = _contentPresentationView.layer;
   BOOL layerPaused = layer.speed == 0;
-  CGFloat pausedReveal = layerPaused ? [self presentedReveal] : 0;
-  if (!_scrollView.tracking && !_transitionInterruptionPending) [self advanceTransitionToTime:CACurrentMediaTime()];
+  CGFloat presentedReveal = [self presentedReveal];
   CGFloat velocity = _transitionVelocity;
+  if (!_scrollView.tracking && !_transitionInterruptionPending && _transitionAnimator != nil &&
+      [self alignTransitionStateTimeWithAnimator]) {
+    [self advanceTransitionStateToTime:CACurrentMediaTime()];
+    velocity = _transitionVelocity;
+  }
   [_transitionAnimator stopAnimation:YES];
   _transitionAnimator = nil;
   if (layerPaused) [self restoreTransitionLayerTiming];
-  _reveal = layerPaused ? pausedReveal : [self revealFromContentPosition];
+  _reveal = presentedReveal;
   _transitionActive = NO;
+  _transitionTimeAlignmentPending = NO;
   _transitionInterruptionPending = NO;
   [self stopPresentationDisplayLink];
   [self applyPresentationAtProgress:[self revealProgress]];
@@ -864,6 +940,7 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
 - (void)completeTransitionWithDrawerOpen:(BOOL)open
 {
   _transitionActive = NO;
+  _transitionTimeAlignmentPending = NO;
   _transitionInterruptionPending = NO;
   [_transitionAnimator stopAnimation:YES];
   _transitionAnimator = nil;
@@ -907,8 +984,10 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
 {
   if (!_gestureEnabled || _laidOutDrawerWidth <= 0 || fabs(velocity.x) <= fabs(velocity.y)) return NO;
 
-  CGFloat reveal = _transitionActive ? [self presentedReveal] : _reveal;
   CGFloat revealVelocity = velocity.x * _openingDirection;
+  if (_phase == RNSideDrawerPhaseSettling) return _targetOpen ? revealVelocity < 0 : revealVelocity > 0;
+
+  CGFloat reveal = _transitionActive ? [self presentedReveal] : _reveal;
   if (reveal <= 0) return revealVelocity > 0;
   if (reveal >= _laidOutDrawerWidth) return revealVelocity < 0;
   return YES;
@@ -921,7 +1000,7 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
   BOOL interruptedTargetOpen = _phase == RNSideDrawerPhaseSettling ? _targetOpen : _open;
   _gestureOriginOpen = interruptedTargetOpen;
   _gestureHapticTriggered = NO;
-  _admittedInteraction = rnsidedrawer::resolveInteraction(_configuredInteraction);
+  _activeInteraction = rnsidedrawer::resolveInteraction(_configuredInteraction);
   _dragStartTranslation = [_scrollView.panGestureRecognizer translationInView:self].x * _openingDirection;
   _deferredPanState = UIGestureRecognizerStatePossible;
   _targetOpen = interruptedTargetOpen;
@@ -933,12 +1012,11 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
     return;
   }
 
-  [self beginAdmittedDrag];
+  [self beginAcceptedDrag];
 }
 
-- (void)beginAdmittedDrag
+- (void)beginAcceptedDrag
 {
-  _activeInteraction = _admittedInteraction;
   _dragStartPosition = _reveal;
   _unconstrainedDragPosition = _dragStartPosition;
   _dragLowerBound = MIN(0, _reveal);
@@ -1062,7 +1140,11 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
     [_hapticFeedback triggerAtLocation:location];
   }
   CGFloat transferredVelocity = revealVelocity * _activeInteraction.releaseVelocityTransfer;
-  _releaseRevealVelocity = isfinite(transferredVelocity) ? transferredVelocity : 0;
+  rnsidedrawer::Spring releaseSpring = RNSideDrawerSpringForCurrentOS(_activeInteraction.spring);
+  _releaseRevealVelocity = rnsidedrawer::limitReleaseVelocity(
+      releaseSpring,
+      transferredVelocity,
+      RNSideDrawerReleaseVelocityLimitDistance);
   _targetOpen = targetOpen;
   _settlingSource = RNSideDrawerSettlingSourceRelease;
   _phase = RNSideDrawerPhaseSettling;
@@ -1089,7 +1171,7 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
                                              initialVelocity:_releaseRevealVelocity];
   [self stopScrollMotionAtOffset:offset];
   if (shouldAnimate) {
-    [self startTransitionAnimator];
+    [self startPreparedTransition];
   } else {
     [self completeTransitionWithDrawerOpen:_targetOpen];
   }
@@ -1217,12 +1299,6 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
   if (_panelView != nil) _panelView.center = center;
 }
 
-- (CGFloat)revealFromContentPosition
-{
-  CGFloat viewportCenter = [self currentScrollOffset] + self.bounds.size.width * 0.5;
-  return (_contentPresentationView.center.x - viewportCenter) * _openingDirection;
-}
-
 - (void)setRevealProgress:(CGFloat)progress
 {
   CGFloat boundedProgress = RNSideDrawerClamp(progress, 0, 1);
@@ -1340,16 +1416,31 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
 
 #pragma mark - Settling observation
 
-- (void)advanceTransitionToTime:(CFTimeInterval)time
+- (void)advanceTransitionStateToTime:(CFTimeInterval)time
 {
-  if (!_transitionActive || time <= _lastTransitionTime) return;
-  CFTimeInterval elapsed = time - _lastTransitionTime;
+  if (!_transitionActive || time <= _transitionStateTime) return;
+  CFTimeInterval elapsed = time - _transitionStateTime;
   CGFloat target = _targetOpen ? _laidOutDrawerWidth : 0;
   rnsidedrawer::SpringState state =
-      rnsidedrawer::evaluateSpring(_activeInteraction.spring, _reveal - target, _transitionVelocity, elapsed);
+      rnsidedrawer::evaluateSpring(_transitionSpring, _reveal - target, _transitionVelocity, elapsed);
   _reveal = target + state.displacement;
   _transitionVelocity = state.velocity;
-  _lastTransitionTime = time;
+  _transitionStateTime = time;
+}
+
+- (BOOL)alignTransitionStateTimeWithAnimator
+{
+  if (!_transitionTimeAlignmentPending) return YES;
+  if (_transitionAnimator == nil) return NO;
+
+  CFTimeInterval animatorElapsedTime =
+      _transitionAnimator.fractionComplete * _transitionAnimator.duration;
+  if (!(animatorElapsedTime > 0) || !isfinite(animatorElapsedTime)) return NO;
+
+  // UIKit exposes elapsed progress, not the animator's absolute start time.
+  _transitionStateTime = CACurrentMediaTime() - animatorElapsedTime;
+  _transitionTimeAlignmentPending = NO;
+  return YES;
 }
 
 - (void)startPresentationDisplayLink
@@ -1360,7 +1451,7 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
   }
   if (_presentationDisplayLink == nil) {
     _presentationDisplayLink =
-        [screen displayLinkWithTarget:self selector:@selector(samplePresentedTransition:)];
+        [screen displayLinkWithTarget:self selector:@selector(handlePresentationDisplayLink:)];
     if (_presentationDisplayLink == nil) return;
     _presentationDisplayScreen = screen;
     if (@available(iOS 15.0, *)) {
@@ -1381,7 +1472,8 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
 - (void)refreshPresentationDisplayLink
 {
   BOOL active = _transitionActive && _phase == RNSideDrawerPhaseSettling;
-  BOOL needed = _transitionInterruptionPending || _progressEventsEnabled || _motion.hasInterpolations();
+  BOOL needed = _transitionAnimator == nil || _transitionInterruptionPending ||
+      _progressEventsEnabled || _motion.hasInterpolations();
 
   if (active && needed) {
     [self startPresentationDisplayLink];
@@ -1390,7 +1482,7 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
   }
 }
 
-- (void)samplePresentedTransition:(CADisplayLink *)displayLink
+- (void)handlePresentationDisplayLink:(CADisplayLink *)displayLink
 {
   if (_presentationDisplayScreen != [self currentScreen]) {
     [self startPresentationDisplayLink];
@@ -1417,7 +1509,7 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
 
     if (layer.speed == 0 || _transitionAnimator == nil) {
       (void)[self stopTransitionAtCurrentPosition];
-      [self beginAdmittedDrag];
+      [self beginAcceptedDrag];
 
       UIGestureRecognizerState state = _deferredPanState == UIGestureRecognizerStatePossible
           ? _scrollView.panGestureRecognizer.state
@@ -1433,22 +1525,56 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
     }
   }
 
+  // The interruption case returned above, so an active transition without an
+  // animator is waiting for its first display boundary.
   if (_transitionAnimator == nil) {
-    [self stopPresentationDisplayLink];
+    CGFloat target = _targetOpen ? _laidOutDrawerWidth : 0;
+    CFTimeInterval stateTime = displayLink.targetTimestamp;
+    CFTimeInterval elapsed = MAX(0, stateTime - _transitionStateTime);
+    rnsidedrawer::SpringState state = rnsidedrawer::evaluateSpring(
+        _transitionSpring, _reveal - target, _transitionVelocity, elapsed);
+    _reveal = target + state.displacement;
+    _transitionVelocity = state.velocity;
+    _transitionStateTime = stateTime;
+
+    if (_reveal == target && _transitionVelocity == 0) {
+      [self completeTransitionWithDrawerOpen:_targetOpen];
+      return;
+    }
+
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    [self applyPresentationAtProgress:[self revealProgress]];
+    [CATransaction commit];
+
+    if (_reveal == target) return;
+
+    [self scheduleTransitionAnimatorToPosition:target fromStateAtTime:stateTime];
     return;
   }
 
-  (void)displayLink;
   CGFloat reveal = [self presentedReveal];
+  BOOL transitionTimeAligned = [self alignTransitionStateTimeWithAnimator];
 
   if (_motion.hasInterpolations()) {
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
-    [self applyMotionAtProgress:RNSideDrawerClamp(reveal / MAX(_laidOutDrawerWidth, 1), 0, 1)];
+    CGFloat motionReveal = reveal;
+    if (transitionTimeAligned) {
+      CGFloat target = _targetOpen ? _laidOutDrawerWidth : 0;
+      rnsidedrawer::SpringState state = rnsidedrawer::evaluateSpring(
+          _transitionSpring,
+          _reveal - target,
+          _transitionVelocity,
+          MAX(0, displayLink.targetTimestamp - _transitionStateTime));
+      motionReveal = target + state.displacement;
+    }
+    [self applyMotionAtProgress:RNSideDrawerClamp(motionReveal / MAX(_laidOutDrawerWidth, 1), 0, 1)];
     [CATransaction commit];
   }
 
   [self publishProgressForReveal:reveal];
+  [self refreshPresentationDisplayLink];
 }
 
 #pragma mark - Events

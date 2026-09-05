@@ -1,13 +1,18 @@
 package com.rninteractionprimitives
 
 import kotlin.math.abs
+import kotlin.math.acosh
+import kotlin.math.asinh
+import kotlin.math.atan2
+import kotlin.math.cbrt
 import kotlin.math.cos
 import kotlin.math.exp
+import kotlin.math.expm1
+import kotlin.math.hypot
+import kotlin.math.ln
 import kotlin.math.max
-import kotlin.math.min
 import kotlin.math.sin
 import kotlin.math.sqrt
-import kotlin.math.tanh
 
 internal enum class SideDrawerDampingType {
     Underdamped,
@@ -22,21 +27,31 @@ internal data class SideDrawerSpring(
     val naturalFrequencySquared: Double,
     val dampingRate: Double,
     val responseRate: Double,
+    val peakDisplacementPerVelocity: Double,
     val dampingType: SideDrawerDampingType,
 )
 
 internal data class SideDrawerInteraction(
-    val spring: SideDrawerSpring,
+    val springMass: Double,
+    val springStiffness: Double,
+    val springDamping: Double,
     val overdragPx: Float,
     val releaseOpenThreshold: Double,
     val releaseVelocitySensitivity: Double,
     val releaseVelocityTransfer: Double,
-)
+) {
+    val spring = resolveSideDrawerSpring(springMass, springStiffness, springDamping)
+}
 
 internal class SideDrawerSpringState {
     var displacement = 0.0
     var velocity = 0.0
 }
+
+internal data class SideDrawerWidthChangeState(
+    val position: Float,
+    val velocity: Double,
+)
 
 internal const val DEFAULT_SIDE_DRAWER_OVERDRAG_DP = 4f
 internal const val DEFAULT_SIDE_DRAWER_RELEASE_OPEN_THRESHOLD = 0.5
@@ -46,6 +61,15 @@ internal const val DEFAULT_SIDE_DRAWER_SPRING_MASS = 0.8
 internal const val DEFAULT_SIDE_DRAWER_SPRING_STIFFNESS = 680.0
 internal const val DEFAULT_SIDE_DRAWER_SPRING_DAMPING = 46.0
 
+private fun sideDrawerPeakDisplacementPerVelocity(naturalFrequency: Double, peakDecay: Double): Double {
+    if (!naturalFrequency.isFinite() || naturalFrequency <= 0.0 ||
+        !peakDecay.isFinite() || peakDecay < 0.0
+    ) {
+        return 0.0
+    }
+    return exp(-peakDecay - ln(naturalFrequency))
+}
+
 private fun createSideDrawerSpring(mass: Double, stiffness: Double, damping: Double): SideDrawerSpring {
     val naturalFrequencySquared = stiffness / mass
     val dampingRate = (damping / 2.0) / mass
@@ -53,20 +77,27 @@ private fun createSideDrawerSpring(mass: Double, stiffness: Double, damping: Dou
     val tolerance = 32.0 * Math.ulp(1.0) * max(dampingRate, naturalFrequency)
     val dampingType: SideDrawerDampingType
     val responseRate: Double
+    val peakDecay: Double
     when {
         abs(dampingRate - naturalFrequency) <= tolerance -> {
             dampingType = SideDrawerDampingType.CriticallyDamped
             responseRate = 0.0
+            peakDecay = 1.0
         }
         dampingRate < naturalFrequency -> {
-            val ratio = dampingRate / naturalFrequency
+            val dampingRatio = dampingRate / naturalFrequency
+            val normalizedResponse = sqrt(max(0.0, (1.0 - dampingRatio) * (1.0 + dampingRatio)))
             dampingType = SideDrawerDampingType.Underdamped
-            responseRate = naturalFrequency * sqrt(max(0.0, 1.0 - ratio * ratio))
+            responseRate = naturalFrequency * normalizedResponse
+            peakDecay = dampingRatio * atan2(normalizedResponse, dampingRatio) / normalizedResponse
         }
         else -> {
-            val ratio = naturalFrequency / dampingRate
+            val dampingRatio = dampingRate / naturalFrequency
+            val normalizedResponse = sqrt(max(0.0, dampingRatio - 1.0)) *
+                sqrt(max(0.0, dampingRatio + 1.0))
             dampingType = SideDrawerDampingType.Overdamped
-            responseRate = dampingRate * sqrt(max(0.0, 1.0 - ratio * ratio))
+            responseRate = naturalFrequency * normalizedResponse
+            peakDecay = (dampingRatio / normalizedResponse) * acosh(dampingRatio)
         }
     }
     return SideDrawerSpring(
@@ -76,8 +107,27 @@ private fun createSideDrawerSpring(mass: Double, stiffness: Double, damping: Dou
         naturalFrequencySquared,
         dampingRate,
         responseRate,
+        sideDrawerPeakDisplacementPerVelocity(naturalFrequency, peakDecay),
         dampingType,
     )
+}
+
+private fun sideDrawerSpringIsRepresentable(spring: SideDrawerSpring): Boolean {
+    if (!spring.mass.isFinite() || spring.mass <= 0.0 ||
+        !spring.stiffness.isFinite() || spring.stiffness <= 0.0 ||
+        !spring.damping.isFinite() || spring.damping <= 0.0 ||
+        !spring.naturalFrequencySquared.isFinite() || spring.naturalFrequencySquared <= 0.0 ||
+        !spring.dampingRate.isFinite() || spring.dampingRate <= 0.0 ||
+        !spring.peakDisplacementPerVelocity.isFinite() || spring.peakDisplacementPerVelocity <= 0.0
+    ) {
+        return false
+    }
+    if (spring.dampingType == SideDrawerDampingType.CriticallyDamped) {
+        return spring.responseRate == 0.0
+    }
+    if (!spring.responseRate.isFinite() || spring.responseRate <= 0.0) return false
+    return spring.dampingType != SideDrawerDampingType.Overdamped ||
+        (spring.dampingRate + spring.responseRate).isFinite()
 }
 
 private val DEFAULT_SIDE_DRAWER_SPRING = createSideDrawerSpring(
@@ -86,13 +136,16 @@ private val DEFAULT_SIDE_DRAWER_SPRING = createSideDrawerSpring(
     DEFAULT_SIDE_DRAWER_SPRING_DAMPING,
 )
 
-internal fun defaultSideDrawerInteraction(overdragPx: Float) = SideDrawerInteraction(
-    DEFAULT_SIDE_DRAWER_SPRING,
-    overdragPx,
-    DEFAULT_SIDE_DRAWER_RELEASE_OPEN_THRESHOLD,
-    DEFAULT_SIDE_DRAWER_RELEASE_VELOCITY_SENSITIVITY,
-    DEFAULT_SIDE_DRAWER_RELEASE_VELOCITY_TRANSFER,
-)
+internal fun defaultSideDrawerInteraction(overdragPx: Float) =
+    SideDrawerInteraction(
+        DEFAULT_SIDE_DRAWER_SPRING_MASS,
+        DEFAULT_SIDE_DRAWER_SPRING_STIFFNESS,
+        DEFAULT_SIDE_DRAWER_SPRING_DAMPING,
+        overdragPx,
+        DEFAULT_SIDE_DRAWER_RELEASE_OPEN_THRESHOLD,
+        DEFAULT_SIDE_DRAWER_RELEASE_VELOCITY_SENSITIVITY,
+        DEFAULT_SIDE_DRAWER_RELEASE_VELOCITY_TRANSFER,
+    )
 
 internal fun resolveSideDrawerSpring(mass: Double, stiffness: Double, damping: Double): SideDrawerSpring {
     val resolvedMass = if (mass.isFinite() && mass > 0.0) mass else DEFAULT_SIDE_DRAWER_SPRING_MASS
@@ -108,13 +161,18 @@ internal fun resolveSideDrawerSpring(mass: Double, stiffness: Double, damping: D
     }
     val naturalFrequencySquared = resolvedStiffness / resolvedMass
     val dampingRate = (resolvedDamping / 2.0) / resolvedMass
+    val naturalFrequency = sqrt(naturalFrequencySquared)
+    val dampingRatio = dampingRate / naturalFrequency
     if (!naturalFrequencySquared.isFinite() || naturalFrequencySquared <= 0.0 ||
-        !dampingRate.isFinite() || dampingRate <= 0.0
+        !dampingRate.isFinite() || dampingRate <= 0.0 ||
+        !naturalFrequency.isFinite() || naturalFrequency <= 0.0 ||
+        !dampingRatio.isFinite() || dampingRatio <= 0.0
     ) {
         return DEFAULT_SIDE_DRAWER_SPRING
     }
 
-    return createSideDrawerSpring(resolvedMass, resolvedStiffness, resolvedDamping)
+    val spring = createSideDrawerSpring(resolvedMass, resolvedStiffness, resolvedDamping)
+    return if (sideDrawerSpringIsRepresentable(spring)) spring else DEFAULT_SIDE_DRAWER_SPRING
 }
 
 internal fun evaluateSideDrawerSpring(
@@ -130,68 +188,147 @@ internal fun evaluateSideDrawerSpring(
         return
     }
 
-    if (spring.dampingType == SideDrawerDampingType.Underdamped) {
-        val angularFrequency = spring.responseRate
-        val sineCoefficient = (initialVelocity + spring.dampingRate * initialDisplacement) / angularFrequency
-        val angle = angularFrequency * elapsed
-        val decay = exp(-spring.dampingRate * elapsed)
-        val oscillation = initialDisplacement * cos(angle) + sineCoefficient * sin(angle)
-        val oscillationVelocity =
-            -initialDisplacement * angularFrequency * sin(angle) +
-                sineCoefficient * angularFrequency * cos(angle)
-        result.displacement = decay * oscillation
-        result.velocity = decay * (oscillationVelocity - spring.dampingRate * oscillation)
-        return
+    // Exact basis functions for x'' + 2αx' + ω₀²x = 0. Expressing the
+    // solution through its unit-velocity response avoids the large opposing
+    // modal coefficients that become ill-conditioned near critical damping
+    // and can overflow for otherwise representable overdamped springs.
+    val phaseResponse: Double
+    val unitVelocityResponse: Double
+    when (spring.dampingType) {
+        SideDrawerDampingType.Underdamped -> {
+            val angle = spring.responseRate * elapsed
+            val decay = exp(-spring.dampingRate * elapsed)
+            val sinc = if (angle == 0.0) 1.0 else sin(angle) / angle
+            phaseResponse = decay * cos(angle)
+            unitVelocityResponse = decay * elapsed * sinc
+        }
+        SideDrawerDampingType.Overdamped -> {
+            val slowRate = -spring.naturalFrequencySquared / (spring.dampingRate + spring.responseRate)
+            val slowDecay = exp(slowRate * elapsed)
+            val angle = spring.responseRate * elapsed
+            val relativeFastDecay = exp(-2.0 * angle)
+            phaseResponse = slowDecay * (1.0 + relativeFastDecay) / 2.0
+            unitVelocityResponse = if (angle == 0.0) {
+                slowDecay * elapsed
+            } else {
+                slowDecay * -expm1(-2.0 * angle) / (2.0 * spring.responseRate)
+            }
+        }
+        SideDrawerDampingType.CriticallyDamped -> {
+            val decay = exp(-spring.dampingRate * elapsed)
+            phaseResponse = decay
+            unitVelocityResponse = decay * elapsed
+        }
     }
 
-    if (spring.dampingType == SideDrawerDampingType.Overdamped) {
-        val slowRate = -spring.naturalFrequencySquared / (spring.dampingRate + spring.responseRate)
-        val fastRate = -(spring.dampingRate + spring.responseRate)
-        val slowCoefficient = (initialVelocity - fastRate * initialDisplacement) / (slowRate - fastRate)
-        val fastCoefficient = initialDisplacement - slowCoefficient
-        val slowDecay = exp(slowRate * elapsed)
-        val fastDecay = exp(fastRate * elapsed)
-        result.displacement = slowCoefficient * slowDecay + fastCoefficient * fastDecay
-        result.velocity = slowRate * slowCoefficient * slowDecay + fastRate * fastCoefficient * fastDecay
-        return
+    result.displacement =
+        initialDisplacement * (phaseResponse + spring.dampingRate * unitVelocityResponse) +
+        initialVelocity * unitVelocityResponse
+    result.velocity =
+        initialVelocity * (phaseResponse - spring.dampingRate * unitVelocityResponse) -
+        spring.naturalFrequencySquared * initialDisplacement * unitVelocityResponse
+}
+
+internal fun limitSideDrawerReleaseVelocity(
+    spring: SideDrawerSpring,
+    velocity: Double,
+    limitDistance: Double,
+): Double {
+    if (!velocity.isFinite()) return 0.0
+    if (velocity == 0.0 || !limitDistance.isFinite() || limitDistance <= 0.0 ||
+        !spring.peakDisplacementPerVelocity.isFinite() || spring.peakDisplacementPerVelocity <= 0.0
+    ) {
+        return velocity
     }
 
-    val coefficient = initialVelocity + spring.dampingRate * initialDisplacement
-    val decay = exp(-spring.dampingRate * elapsed)
-    result.displacement = (initialDisplacement + coefficient * elapsed) * decay
-    result.velocity = (initialVelocity - spring.dampingRate * coefficient * elapsed) * decay
+    val velocityAtLimitDistance = limitDistance / spring.peakDisplacementPerVelocity
+    if (!velocityAtLimitDistance.isFinite()) return velocity
+    if (velocityAtLimitDistance == 0.0) return 0.0
+
+    val normalizedVelocity = abs(velocity) / velocityAtLimitDistance
+    if (normalizedVelocity == 0.0) return velocity
+
+    // Exact positive root of u² = s² + s⁶. Its cubic asymptote avoids
+    // squaring overflow without introducing a threshold in the curve.
+    val squaredVelocity = normalizedVelocity * normalizedVelocity
+    if (squaredVelocity == 0.0) return velocity
+    val scaledSquare = CUBIC_INPUT_SCALE * squaredVelocity
+    val limitedMagnitude = if (scaledSquare.isFinite()) {
+        val normalizedLimit = sqrt(
+            CUBIC_OUTPUT_SCALE * kotlin.math.sinh(asinh(scaledSquare) / 3.0),
+        )
+        velocityAtLimitDistance * normalizedLimit
+    } else if (normalizedVelocity.isFinite()) {
+        velocityAtLimitDistance * cbrt(normalizedVelocity)
+    } else {
+        val cubeRootScale = cbrt(velocityAtLimitDistance)
+        cbrt(abs(velocity)) * cubeRootScale * cubeRootScale
+    }
+    return Math.copySign(minOf(limitedMagnitude, abs(velocity)), velocity)
 }
 
-internal fun remapSideDrawerPosition(position: Float, oldWidth: Float, newWidth: Float): Float = when {
-    position < 0f -> position
-    position > oldWidth -> newWidth + position - oldWidth
-    oldWidth > 0f -> position / oldWidth * newWidth
-    else -> position
+internal fun sideDrawerSpringDisplacementBound(
+    spring: SideDrawerSpring,
+    displacement: Double,
+    velocity: Double,
+): Double {
+    if (!displacement.isFinite() || !velocity.isFinite()) return Double.POSITIVE_INFINITY
+    val naturalFrequency = sqrt(spring.naturalFrequencySquared)
+    if (!naturalFrequency.isFinite() || naturalFrequency <= 0.0) return Double.POSITIVE_INFINITY
+    return hypot(displacement, velocity / naturalFrequency)
 }
+
+internal fun remapSideDrawerState(
+    position: Float,
+    velocity: Double,
+    oldWidth: Float,
+    newWidth: Float,
+): SideDrawerWidthChangeState {
+    val remappedPosition = when {
+        position < 0f -> position
+        position > oldWidth -> newWidth + position - oldWidth
+        oldWidth > 0f -> position / oldWidth * newWidth
+        else -> position
+    }
+    val velocityScale = when {
+        oldWidth <= 0f || position < 0f || position > oldWidth -> 1.0
+        position == 0f && velocity < 0.0 -> 1.0
+        position == oldWidth && velocity > 0.0 -> 1.0
+        else -> newWidth.toDouble() / oldWidth
+    }
+    val remappedVelocity = velocity * velocityScale
+    return SideDrawerWidthChangeState(
+        remappedPosition,
+        if (remappedVelocity.isFinite()) remappedVelocity else 0.0,
+    )
+}
+
+internal fun remapSideDrawerPosition(position: Float, oldWidth: Float, newWidth: Float): Float =
+    remapSideDrawerState(position, 0.0, oldWidth, newWidth).position
 
 internal fun resistedSideDrawerPosition(
     unconstrainedPosition: Float,
     lowerBound: Float,
     upperBound: Float,
-    maximumOverdrag: Float,
+    resistanceDistance: Float,
 ): Float {
-    if (maximumOverdrag <= 0f) return unconstrainedPosition.coerceIn(lowerBound, upperBound)
+    if (resistanceDistance <= 0f) return unconstrainedPosition.coerceIn(lowerBound, upperBound)
     if (unconstrainedPosition < lowerBound) {
-        return lowerBound + maximumOverdrag * tanh((unconstrainedPosition - lowerBound) / maximumOverdrag)
+        return lowerBound + resistanceDistance * asinh((unconstrainedPosition - lowerBound) / resistanceDistance)
     }
     if (unconstrainedPosition <= upperBound) return unconstrainedPosition
-    return upperBound + maximumOverdrag * tanh((unconstrainedPosition - upperBound) / maximumOverdrag)
+    return upperBound + resistanceDistance * asinh((unconstrainedPosition - upperBound) / resistanceDistance)
 }
 
 internal fun resistedSideDrawerVelocity(
     unconstrainedPosition: Float,
     lowerBound: Float,
     upperBound: Float,
-    maximumOverdrag: Float,
+    resistanceDistance: Float,
     velocity: Float,
 ): Float {
     if (!velocity.isFinite()) return 0f
-    if (maximumOverdrag <= 0f) {
+    if (resistanceDistance <= 0f) {
         if ((unconstrainedPosition <= lowerBound && velocity < 0f) ||
             (unconstrainedPosition >= upperBound && velocity > 0f)
         ) {
@@ -202,6 +339,9 @@ internal fun resistedSideDrawerVelocity(
     if (unconstrainedPosition in lowerBound..upperBound) return velocity
 
     val boundary = if (unconstrainedPosition < lowerBound) lowerBound else upperBound
-    val normalizedDistance = tanh((unconstrainedPosition - boundary) / maximumOverdrag)
-    return velocity * (1f - normalizedDistance * normalizedDistance)
+    val normalizedDistance = (unconstrainedPosition - boundary) / resistanceDistance
+    return velocity / hypot(1f, normalizedDistance)
 }
+
+private const val CUBIC_INPUT_SCALE = 2.598076211353316
+private const val CUBIC_OUTPUT_SCALE = 1.154700538379252

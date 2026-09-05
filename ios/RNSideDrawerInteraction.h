@@ -1,4 +1,6 @@
-#import <CoreGraphics/CoreGraphics.h>
+#pragma once
+
+#include <CoreGraphics/CoreGraphics.h>
 
 namespace rnsidedrawer {
 
@@ -15,6 +17,7 @@ struct Spring {
   CGFloat naturalFrequencySquared;
   CGFloat dampingRate;
   CGFloat responseRate;
+  CGFloat peakDisplacementPerVelocity;
   DampingType dampingType;
 };
 
@@ -41,8 +44,14 @@ struct SpringState {
   CGFloat velocity;
 };
 
+struct WidthChangeState {
+  CGFloat position;
+  CGFloat velocity;
+};
+
 InteractionConfiguration defaultInteractionConfiguration() noexcept;
 Interaction resolveInteraction(InteractionConfiguration configuration) noexcept;
+Spring criticallyDampedSpring(const Spring &spring) noexcept;
 
 SpringState evaluateSpring(
     const Spring &spring,
@@ -50,19 +59,30 @@ SpringState evaluateSpring(
     CGFloat initialVelocity,
     CFTimeInterval elapsed) noexcept;
 
+CGFloat limitReleaseVelocity(
+    const Spring &spring,
+    CGFloat velocity,
+    CGFloat limitDistance) noexcept;
+
+WidthChangeState remapStateForWidthChange(
+    CGFloat position,
+    CGFloat velocity,
+    CGFloat oldWidth,
+    CGFloat newWidth) noexcept;
+
 CGFloat remapPositionForWidthChange(CGFloat position, CGFloat oldWidth, CGFloat newWidth) noexcept;
 
 CGFloat resistedPosition(
     CGFloat unconstrainedPosition,
     CGFloat lowerBound,
     CGFloat upperBound,
-    CGFloat maximumOverdrag) noexcept;
+    CGFloat resistanceDistance) noexcept;
 
 CGFloat resistedVelocity(
     CGFloat unconstrainedPosition,
     CGFloat lowerBound,
     CGFloat upperBound,
-    CGFloat maximumOverdrag,
+    CGFloat resistanceDistance,
     CGFloat velocity) noexcept;
 
 bool releaseShouldOpen(

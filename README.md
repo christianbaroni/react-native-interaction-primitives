@@ -170,7 +170,7 @@ interaction={{
 }}
 ```
 
-These are direct spring parameters, not duration or bounce aliases. Lower damping can create underdamped oscillation; critical and overdamped combinations are also supported. Zero damping is excluded because it never completes, while the drawer's settling phase must reach an endpoint.
+These are direct spring parameters, not duration or bounce aliases. Lower damping can create underdamped oscillation; critical and overdamped combinations are also supported. Android and iOS 17 or later render the configured overdamped response directly. On iOS 15 and 16, UIKit has no public single-spring overdamping path, so overdamped configurations render with the same natural frequency at critical damping; release-velocity limiting and interruption calculations use that same spring. Zero damping is excluded because it never completes, while the drawer's settling phase must reach an endpoint.
 
 Release intent and release motion are separate decisions:
 
@@ -187,11 +187,11 @@ interaction={{
 
 `openThreshold` is the projected reveal progress that selects open and must be in `[0, 1]`. `velocitySensitivity` changes only endpoint selection: `0` ignores velocity, `1` preserves the accepted platform-native prediction, and larger values make decisive flings more influential. It is not an animation duration and does not need to track the spring.
 
-`velocityTransfer` changes only how much mapped finger velocity the settling spring receives. `0` starts from rest, `1` requests a continuous release handoff, and values above `1` amplify release energy.
+`velocityTransfer` scales the displayed finger velocity before the spring starts. `0` starts from rest, `1` leaves that input scale unchanged, and values above `1` amplify release energy. Target selection always uses the displayed velocity before this scaling. Native code then measures the spring travel caused by velocity alone and smoothly reduces only extreme values using a `32` point/dp distance scale. The curve is effectively unchanged near rest, stays strictly ordered, and remains unbounded. It does not depend on drag distance, release position, target distance, or drawer width.
 
-`overdrag` is measured in points on iOS and density-independent pixels on Android. It controls gesture-derived endpoint travel and defaults to `4`; `0` creates a hard, immediately reversible direct boundary. It does not cap or rewrite post-release spring motion.
+`overdrag` is measured in points on iOS and density-independent pixels on Android. It sets the distance scale for progressive gesture resistance beyond the current drag range and defaults to `4`; `0` creates a hard, immediately reversible boundary. Resistance is unbounded, so outward movement remains responsive while its displayed speed decreases smoothly. On transition interruption, the visible drawer position becomes the temporary outer limit: inward movement follows the finger one-to-one, and resistance applies only to newly created outward travel. Spring-created overshoot is never reinterpreted as gesture overdrag.
 
-Each admitted gesture snapshots the complete interaction configuration, including its release policy. Programmatic settling takes a fresh snapshot when it begins. Updating `interaction` never changes a gesture or settle already in progress; layout, pause, and resume retain that interaction's snapshot. Gesture input, target choice, settling, interruption, and retargeting remain native on Paper and Fabric.
+Each accepted gesture snapshots the complete interaction configuration, including its release policy. Programmatic settling takes a fresh snapshot when it begins. Updating `interaction` never changes a gesture or settle already in progress; layout, pause, and resume retain that interaction's snapshot. Gesture input, target choice, settling, interruption, and retargeting remain native on Paper and Fabric.
 
 Each motion channel has matching `inputRange` and `outputRange` arrays with at least two points. Inputs must be finite, strictly increasing, and within `[0, 1]`; outputs must be finite. Native evaluation clamps before the first input and after the last. Translation outputs use React Native layout units: points on iOS and density-independent pixels on Android.
 
@@ -276,7 +276,7 @@ The controller exposes `progress`, `phase`, `settlingSource`, and `targetOpen` s
 
 On iOS, `UIScrollView` owns full-surface touch arbitration, but its content offset and bounce physics do not own settling. A `UIViewPropertyAnimator` spring moves the native content host directly. On Android, the native parent owns directional interception and `Choreographer` advances the same damped-spring equation. Both platforms choose the endpoint with native velocity projection and apply the configured release and boundary policy before starting the spring. An outward gesture cannot begin from the closed endpoint; after a valid gesture has moved inward, reversal into either endpoint uses the same bounded resistance.
 
-Core Animation owns iOS pane presentation and receives system-managed ProMotion pacing. A `CADisplayLink` exists only while configured secondary motion, progress observation, or touch-pause resumption requires it; it samples the presented pane once and never advances primary motion. Android advances from `Choreographer.FrameCallback.frameTimeNanos` and requests the high frame-rate category on Android 15 and later. Neither implementation waits on JavaScript or Reanimated to produce a frame.
+Core Animation owns continuous iOS pane presentation and receives system-managed ProMotion pacing. A `CADisplayLink` advances the spring once to a known display boundary before handing primary motion to UIKit; after that handoff, it runs only while configured secondary motion, progress observation, or touch-pause resumption requires it. Android advances from `Choreographer.FrameCallback.frameTimeNanos` and requests the high frame-rate category on Android 15 and later. Neither implementation waits on JavaScript or Reanimated to produce a frame.
 
 For 120 Hz updates on supported iPhones, the host application must set `CADisableMinimumFrameDurationOnPhone` to `true`. Actual refresh cadence remains subject to the display, host configuration, Low Power Mode, and system thermal policy.
 

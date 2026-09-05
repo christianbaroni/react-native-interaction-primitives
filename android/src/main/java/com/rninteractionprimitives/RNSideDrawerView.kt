@@ -159,30 +159,36 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
         }
 
     var springDamping: Double
-        get() = configuredInteraction.spring.damping
+        get() = configuredInteraction.springDamping
         set(value) {
-            val spring = configuredInteraction.spring
-            configuredInteraction = configuredInteraction.copy(
-                spring = resolveSideDrawerSpring(spring.mass, spring.stiffness, value),
-            )
+            val resolved = if (value.isFinite() && value > 0.0) {
+                value
+            } else {
+                DEFAULT_SIDE_DRAWER_SPRING_DAMPING
+            }
+            configuredInteraction = configuredInteraction.copy(springDamping = resolved)
         }
 
     var springMass: Double
-        get() = configuredInteraction.spring.mass
+        get() = configuredInteraction.springMass
         set(value) {
-            val spring = configuredInteraction.spring
-            configuredInteraction = configuredInteraction.copy(
-                spring = resolveSideDrawerSpring(value, spring.stiffness, spring.damping),
-            )
+            val resolved = if (value.isFinite() && value > 0.0) {
+                value
+            } else {
+                DEFAULT_SIDE_DRAWER_SPRING_MASS
+            }
+            configuredInteraction = configuredInteraction.copy(springMass = resolved)
         }
 
     var springStiffness: Double
-        get() = configuredInteraction.spring.stiffness
+        get() = configuredInteraction.springStiffness
         set(value) {
-            val spring = configuredInteraction.spring
-            configuredInteraction = configuredInteraction.copy(
-                spring = resolveSideDrawerSpring(spring.mass, value, spring.damping),
-            )
+            val resolved = if (value.isFinite() && value > 0.0) {
+                value
+            } else {
+                DEFAULT_SIDE_DRAWER_SPRING_STIFFNESS
+            }
+            configuredInteraction = configuredInteraction.copy(springStiffness = resolved)
         }
 
     var contentBorderColor: Int = Color.TRANSPARENT
@@ -318,7 +324,6 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
         val settlingBeforeLayout = phase == Phase.Settling
         if (settlingBeforeLayout) synchronizeTransition()
         val resumeSettling = phase == Phase.Settling
-        val resumeVelocity = if (resumeSettling) transitionVelocityPxPerSecond else 0.0
         val resumeSource = settlingSource
         val previousDrawerWidth = laidOutDrawerWidthPx
         val previousReveal = revealPx
@@ -333,8 +338,19 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
         panelView?.layout(0, 0, hostWidth, hostHeight)
         contentPresentationView.layout(0, 0, hostWidth, hostHeight)
         hasLaidOut = true
+        val resumedTransitionState = if (resumeSettling) {
+            remapSideDrawerState(
+                previousReveal,
+                transitionVelocityPxPerSecond,
+                previousDrawerWidth,
+                laidOutDrawerWidthPx,
+            )
+        } else {
+            null
+        }
         revealPx = when {
             firstLayout -> if (initialOpen) laidOutDrawerWidthPx else 0f
+            resumedTransitionState != null -> resumedTransitionState.position
             previousReveal < 0f -> previousReveal
             previousReveal > previousDrawerWidth -> laidOutDrawerWidthPx + previousReveal - previousDrawerWidth
             previousDrawerWidth > 0f -> previousReveal / previousDrawerWidth * laidOutDrawerWidthPx
@@ -359,7 +375,13 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
         applyPresentation()
 
         if (resumeSettling) {
-            startTransition(targetOpen, resumeSource, true, resumeVelocity, activeInteraction)
+            startTransition(
+                targetOpen,
+                resumeSource,
+                true,
+                resumedTransitionState?.velocity ?: 0.0,
+                activeInteraction,
+            )
         } else if (firstLayout) {
             open = initialOpen
             targetOpen = open
@@ -606,15 +628,21 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
 
     private fun startReleaseTransition(velocityPxPerSecond: Float, performHaptic: Boolean) {
         val interaction = activeInteraction
-        val presentedVelocity = releaseVelocityForCurrentDrag(velocityPxPerSecond)
+        val displayedVelocity = releaseVelocityForCurrentDrag(velocityPxPerSecond)
         val projectedPosition = projectedReleasePosition(
             revealPx,
-            presentedVelocity * interaction.releaseVelocitySensitivity,
+            displayedVelocity * interaction.releaseVelocitySensitivity,
         )
         val nextOpen = projectedPosition >= laidOutDrawerWidthPx * interaction.releaseOpenThreshold
         if (performHaptic && nextOpen != gestureOriginOpen) gestureReleaseHaptic?.perform(this)
-        val transferredVelocity = presentedVelocity * interaction.releaseVelocityTransfer
-        val initialVelocity = if (transferredVelocity.isFinite()) transferredVelocity else 0.0
+        val transferredVelocity = displayedVelocity * interaction.releaseVelocityTransfer
+        val velocityLimitDistancePx =
+            RELEASE_VELOCITY_LIMIT_DISTANCE_DP * resources.displayMetrics.density
+        val initialVelocity = limitSideDrawerReleaseVelocity(
+            interaction.spring,
+            transferredVelocity,
+            velocityLimitDistancePx.toDouble(),
+        )
         startTransition(nextOpen, SettlingSource.Release, true, initialVelocity, interaction)
     }
 
@@ -633,12 +661,17 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
         publishProgress()
         stopTransitionAnimation()
         val target = targetPosition(openAtEnd)
-        val atRest = abs(revealPx - target) <= TRANSITION_POSITION_EPSILON_PX
-        if (!animated || atRest) {
+        val resolvedInitialVelocity = if (initialVelocityPxPerSecond.isFinite()) {
+            initialVelocityPxPerSecond
+        } else {
+            0.0
+        }
+        val atEquilibrium = revealPx == target && resolvedInitialVelocity == 0.0
+        if (!animated || atEquilibrium) {
             completeTransition(openAtEnd)
             return
         }
-        startTransitionAnimation(initialVelocityPxPerSecond)
+        startTransitionAnimation(resolvedInitialVelocity)
     }
 
     private fun startTransitionAnimation(velocityPxPerSecond: Double) {
@@ -661,14 +694,18 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
         evaluateSideDrawerSpring(activeInteraction.spring, initialDisplacement, initialVelocity, elapsed, transitionState)
         val displacement = transitionState.displacement
         val velocity = transitionState.velocity
+        if (!displacement.isFinite() || !velocity.isFinite()) {
+            completeTransition(targetOpen)
+            return false
+        }
 
         revealPx = target + displacement.toFloat()
         transitionVelocityPxPerSecond = velocity
         applyPresentation()
         publishProgress()
-        if (abs(displacement) <= TRANSITION_POSITION_EPSILON_PX &&
-            abs(velocity) <= TRANSITION_VELOCITY_EPSILON_PX_PER_SECOND
-        ) {
+        val displacementBound = sideDrawerSpringDisplacementBound(activeInteraction.spring, displacement, velocity)
+        val completionTolerancePx = TRANSITION_COMPLETION_DISTANCE_DP * resources.displayMetrics.density.toDouble()
+        if (displacementBound <= completionTolerancePx) {
             completeTransition(targetOpen)
             return false
         }
@@ -809,8 +846,11 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
         return if (revealsLeft) 1 else -1
     }
 
-    private fun canMoveInDirection(revealDelta: Float): Boolean =
-        (revealPx > 0f || revealDelta > 0f) && (revealPx < laidOutDrawerWidthPx || revealDelta < 0f)
+    private fun canMoveInDirection(revealDelta: Float): Boolean {
+        if (phase == Phase.Settling) return if (targetOpen) revealDelta < 0f else revealDelta > 0f
+        return (revealPx > 0f || revealDelta > 0f) &&
+            (revealPx < laidOutDrawerWidthPx || revealDelta < 0f)
+    }
 
     private fun setUnconstrainedDragPosition(value: Float) {
         unconstrainedDragPositionPx = value
@@ -1007,7 +1047,7 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
     private companion object {
         const val INVALID_POINTER_ID = -1
         const val NANOS_PER_SECOND = 1_000_000_000.0
-        const val TRANSITION_POSITION_EPSILON_PX = 0.5
-        const val TRANSITION_VELOCITY_EPSILON_PX_PER_SECOND = 5.0
+        const val RELEASE_VELOCITY_LIMIT_DISTANCE_DP = 32f
+        const val TRANSITION_COMPLETION_DISTANCE_DP = 0.5
     }
 }
