@@ -193,6 +193,8 @@ interaction={{
 
 Each accepted gesture snapshots the complete interaction configuration, including its release policy. Programmatic settling takes a fresh snapshot when it begins. Updating `interaction` never changes a gesture or settle already in progress; layout, pause, and resume retain that interaction's snapshot. Gesture input, target choice, settling, interruption, and retargeting remain native on Paper and Fabric.
 
+An accepted opening drag or open command dismisses text input in the main content. Focus is not restored automatically when the drawer closes; restoring a particular input is application intent and can be handled from `onOpenChange`.
+
 Each motion channel has matching `inputRange` and `outputRange` arrays with at least two points. Inputs must be finite, strictly increasing, and within `[0, 1]`; outputs must be finite. Native evaluation clamps before the first input and after the last. Translation outputs use React Native layout units: points on iOS and density-independent pixels on Android.
 
 `motion.content.border` draws above the application content and overlay while inheriting the pane's native corner mask and full-screen transform origin. `color` is required, `width` is measured in React Native layout units and defaults to `1`, and `opacity` is an optional motion interpolation. A missing border has zero width and adds no motion channel.

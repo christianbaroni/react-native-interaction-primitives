@@ -1,5 +1,6 @@
 package com.rninteractionprimitives
 
+import android.content.Context
 import android.graphics.Color
 import android.os.Build
 import android.view.Choreographer
@@ -8,6 +9,7 @@ import android.view.VelocityTracker
 import android.view.View
 import android.view.ViewConfiguration
 import android.view.ViewGroup
+import android.view.inputmethod.InputMethodManager
 import android.widget.OverScroller
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.OnBackPressedDispatcherOwner
@@ -279,6 +281,27 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
     }
 
     // Lifecycle and touch dispatch
+
+    private fun dismissContentKeyboard() {
+        val focusedView = contentView?.findFocus() ?: return
+        if (!focusedView.onCheckIsTextEditor()) return
+        val windowToken = focusedView.windowToken
+        val focusRoot = focusedView.rootView as? ViewGroup
+        if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P && focusedView.isInTouchMode && focusRoot != null) {
+            // Older Android can otherwise move focus straight to another editor.
+            val descendantFocusability = focusRoot.descendantFocusability
+            focusRoot.descendantFocusability = FOCUS_BLOCK_DESCENDANTS
+            try {
+                focusedView.clearFocus()
+            } finally {
+                focusRoot.descendantFocusability = descendantFocusability
+            }
+        } else {
+            focusedView.clearFocus()
+        }
+        val inputMethodManager = context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+        inputMethodManager.hideSoftInputFromWindow(windowToken, 0)
+    }
 
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
@@ -609,6 +632,7 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
 
     private fun setOpen(nextOpen: Boolean, animated: Boolean) {
         if (!hasLaidOut) {
+            if (nextOpen) dismissContentKeyboard()
             initialOpen = nextOpen
             open = nextOpen
             targetOpen = nextOpen
@@ -619,6 +643,7 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
         }
         if ((phase == Phase.Open && nextOpen) || (phase == Phase.Closed && !nextOpen)) return
         if (animated && phase == Phase.Settling && targetOpen == nextOpen) return
+        if (nextOpen) dismissContentKeyboard()
         if (phase == Phase.Settling) synchronizeTransition()
         val initialVelocity = if (phase == Phase.Settling) transitionVelocityPxPerSecond else 0.0
         stopTransitionAnimation()
@@ -764,6 +789,7 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
         if (isDragging) return
         val wasSettling = phase == Phase.Settling
         val interruptedTarget = if (wasSettling) targetOpen else open
+        if (!interruptedTarget) dismissContentKeyboard()
         stopTransitionAnimation()
         isDragging = true
         activeInteraction = configuredInteraction

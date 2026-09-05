@@ -79,6 +79,23 @@ describe('iOS native view ownership', () => {
     expect(gestureScrollViewHeader + root).not.toContain('cancelReactTouchesForActivePan');
     expect(root).toContain('_scrollView.delaysContentTouches = NO;');
   });
+
+  it('dismisses content editing only after an opening action is accepted', () => {
+    const root = source('RNSideDrawerView.mm');
+    const command = between(
+      root,
+      '- (void)setOpen:(BOOL)open animated:(BOOL)animated source:(RNSideDrawerSettlingSource)source\n{',
+      '- (void)startTransitionWithTargetOpen:'
+    );
+    const drag = between(root, '- (void)scrollViewWillBeginDragging:(UIScrollView *)scrollView\n{', '- (void)beginAcceptedDrag');
+    const sameStateGuard = 'if ((_phase == RNSideDrawerPhaseOpen && open) || (_phase == RNSideDrawerPhaseClosed && !open)) return;';
+
+    expect(command).toContain('if (open) [_contentView endEditing:YES]');
+    expect(command.indexOf(sameStateGuard)).toBeLessThan(command.lastIndexOf('[_contentView endEditing:YES]'));
+    expect(drag).toContain('if (!interruptedTargetOpen) [_contentView endEditing:YES]');
+    expect(root.match(/endEditing:YES/g)).toHaveLength(3);
+    expect(root).not.toContain('becomeFirstResponder');
+  });
 });
 
 describe('iOS drawer transition ownership', () => {

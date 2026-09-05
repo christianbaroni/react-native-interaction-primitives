@@ -742,6 +742,7 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
 - (void)setOpen:(BOOL)open animated:(BOOL)animated source:(RNSideDrawerSettlingSource)source
 {
   if (!_hasLaidOut) {
+    if (open) [_contentView endEditing:YES];
     _initialOpen = open;
     _targetOpen = open;
     _open = open;
@@ -753,6 +754,7 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
   if ((_phase == RNSideDrawerPhaseOpen && open) || (_phase == RNSideDrawerPhaseClosed && !open)) return;
   if (animated && _phase == RNSideDrawerPhaseSettling && _targetOpen == open) return;
 
+  if (open) [_contentView endEditing:YES];
   CGFloat revealVelocity = _phase == RNSideDrawerPhaseSettling ? [self stopTransitionAtCurrentPosition] : 0;
   BOOL cancelActiveDrag = _phase == RNSideDrawerPhaseDragging;
 
@@ -998,6 +1000,7 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
   (void)scrollView;
   _suppressCurrentDragRelease = NO;
   BOOL interruptedTargetOpen = _phase == RNSideDrawerPhaseSettling ? _targetOpen : _open;
+  if (!interruptedTargetOpen) [_contentView endEditing:YES];
   _gestureOriginOpen = interruptedTargetOpen;
   _gestureHapticTriggered = NO;
   _activeInteraction = rnsidedrawer::resolveInteraction(_configuredInteraction);

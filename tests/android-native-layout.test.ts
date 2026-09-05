@@ -74,6 +74,27 @@ describe('Android native view ownership', () => {
     expect(presentation).toContain('content.setDrawerScrimEnabled(targetOpen)');
     expect(content + root).not.toContain('setDrawerProgress');
   });
+
+  it('dismisses content input only after an opening action is accepted', () => {
+    const root = source('RNSideDrawerView.kt');
+    const dismiss = between(root, 'private fun dismissContentKeyboard()', 'override fun onAttachedToWindow()');
+    const command = between(root, 'private fun setOpen(', 'private fun startReleaseTransition(');
+    const drag = between(root, 'private fun beginDragging(', 'private fun clearTouchTracking(');
+    const sameStateGuard = 'if ((phase == Phase.Open && nextOpen) || (phase == Phase.Closed && !nextOpen)) return';
+
+    expect(dismiss).toContain('contentView?.findFocus()');
+    expect(dismiss).toContain('focusedView.onCheckIsTextEditor()');
+    expect(dismiss).toContain('focusedView.clearFocus()');
+    expect(dismiss).toContain('hideSoftInputFromWindow(windowToken, 0)');
+    expect(dismiss).toContain('Build.VERSION.SDK_INT <= Build.VERSION_CODES.P');
+    expect(dismiss).toContain('focusRoot.descendantFocusability = FOCUS_BLOCK_DESCENDANTS');
+    expect(command).toContain('if (nextOpen) dismissContentKeyboard()');
+    expect(command.indexOf(sameStateGuard)).toBeLessThan(command.lastIndexOf('dismissContentKeyboard()'));
+    expect(drag).toContain('if (!interruptedTarget) dismissContentKeyboard()');
+    expect(root.match(/dismissContentKeyboard\(\)/g)).toHaveLength(4);
+    expect(root).not.toContain('showSoftInput');
+    expect(root).not.toContain('requestFocus()');
+  });
 });
 
 describe('Android drawer transition ownership', () => {
