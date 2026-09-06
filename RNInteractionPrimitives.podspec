@@ -11,7 +11,7 @@ Pod::Spec.new do |s|
   s.authors      = package["author"]
 
   s.platforms    = { :ios => "15.1" }
-  s.source       = { :git => package["repository"], :tag => "#{s.version}" }
+  s.source       = { :git => package["repository"], :tag => "v#{s.version}" }
   s.source_files = "ios/**/*.{h,m,mm}"
 
   install_modules_dependencies(s)
