@@ -1,6 +1,6 @@
 {
   "name": "react-native-interaction-primitives",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "packageManager": "yarn@4.13.0",
   "description": "Native interaction primitives for React Native",
   "main": "lib/commonjs/index",
