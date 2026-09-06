@@ -178,36 +178,45 @@ SpringState evaluateSpring(
   // solution through its unit-velocity response avoids the large opposing
   // modal coefficients that become ill-conditioned near critical damping
   // and can overflow for otherwise representable overdamped springs.
-  CGFloat phaseResponse;
+  CGFloat displacementResponse;
+  CGFloat velocityResponse;
   CGFloat unitVelocityResponse;
 
   if (spring.dampingType == DampingType::Underdamped) {
     const CGFloat angle = spring.responseRate * elapsed;
     const CGFloat decay = std::exp(-spring.dampingRate * elapsed);
     const CGFloat sinc = angle == 0 ? 1 : std::sin(angle) / angle;
-    phaseResponse = decay * std::cos(angle);
+    const CGFloat phaseResponse = decay * std::cos(angle);
     unitVelocityResponse = decay * elapsed * sinc;
+    const CGFloat dampingResponse = spring.dampingRate * unitVelocityResponse;
+    displacementResponse = phaseResponse + dampingResponse;
+    velocityResponse = phaseResponse - dampingResponse;
   } else if (spring.dampingType == DampingType::Overdamped) {
     const CGFloat slowRate =
         -spring.naturalFrequencySquared / (spring.dampingRate + spring.responseRate);
     const CGFloat slowDecay = std::exp(slowRate * elapsed);
     const CGFloat angle = spring.responseRate * elapsed;
     const CGFloat relativeFastDecay = std::exp(-2 * angle);
-    phaseResponse = slowDecay * (1 + relativeFastDecay) / 2;
     unitVelocityResponse = angle == 0
         ? slowDecay * elapsed
         : slowDecay * -std::expm1(-2 * angle) / (2 * spring.responseRate);
+    // Keep the slow tail out of a subtraction of nearly equal terms.
+    const CGFloat slowResponse = slowRate * unitVelocityResponse;
+    displacementResponse = slowDecay - slowResponse;
+    velocityResponse = slowDecay * relativeFastDecay + slowResponse;
   } else {
     const CGFloat decay = std::exp(-spring.dampingRate * elapsed);
-    phaseResponse = decay;
     unitVelocityResponse = decay * elapsed;
+    const CGFloat dampingResponse = spring.dampingRate * unitVelocityResponse;
+    displacementResponse = decay + dampingResponse;
+    velocityResponse = decay - dampingResponse;
   }
 
+  // Form the restoring response before scaling by displacement to avoid overflow.
   return {
-      initialDisplacement * (phaseResponse + spring.dampingRate * unitVelocityResponse) +
-          initialVelocity * unitVelocityResponse,
-      initialVelocity * (phaseResponse - spring.dampingRate * unitVelocityResponse) -
-          spring.naturalFrequencySquared * initialDisplacement * unitVelocityResponse};
+      initialDisplacement * displacementResponse + initialVelocity * unitVelocityResponse,
+      initialVelocity * velocityResponse -
+          initialDisplacement * (spring.naturalFrequencySquared * unitVelocityResponse)};
 }
 
 CGFloat limitReleaseVelocity(

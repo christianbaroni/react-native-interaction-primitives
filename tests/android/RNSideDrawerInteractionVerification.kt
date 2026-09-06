@@ -14,7 +14,7 @@ private fun requireNear(
     absolute: Double = ABSOLUTE_TOLERANCE,
 ) {
     val scale = max(1.0, max(abs(actual), abs(expected)))
-    check(abs(actual - expected) <= max(absolute, relative * scale)) {
+    check(actual.isFinite() && expected.isFinite() && abs(actual - expected) <= max(absolute, relative * scale)) {
         "Expected $expected, got $actual"
     }
 }
@@ -149,6 +149,61 @@ private fun verifySpringRepresentation() {
     requireNear(overflow.mass, DEFAULT_SIDE_DRAWER_SPRING_MASS)
     requireNear(overflow.stiffness, DEFAULT_SIDE_DRAWER_SPRING_STIFFNESS)
     requireNear(overflow.damping, DEFAULT_SIDE_DRAWER_SPRING_DAMPING)
+}
+
+private fun verifyExtremeSpringTransfer() {
+    data class Case(
+        val damping: Double,
+        val restoringDisplacement: Double,
+        val restoringVelocity: Double,
+        val velocityOnlyDisplacement: Double,
+        val velocityOnlyVelocity: Double,
+    )
+    // Modal solutions evaluated at 800-digit precision from the admitted double inputs.
+    val cases = listOf(
+        Case(1e307, -294.41421268138345, 2944.1421268138342, 9.200444146293232e-288, -9.200444146293233e-287),
+        Case(1.7e307, -304.691987092261, 1792.305806425065, 5.600955645078327e-288, -3.2946797912225456e-287),
+    )
+    cases.forEach { testCase ->
+        val spring = resolveSideDrawerSpring(1.0, 1e308, testCase.damping)
+        requireNear(spring.stiffness, 1e308)
+        requireNear(spring.damping, testCase.damping)
+        val restoring = evaluate(spring, -320.0, 0.0, 1.0 / 120.0)
+        requireNear(restoring.displacement, testCase.restoringDisplacement)
+        requireNear(restoring.velocity, testCase.restoringVelocity)
+        val velocityOnly = evaluate(spring, 0.0, 1e20, 1.0 / 120.0)
+        requireNear(velocityOnly.displacement / testCase.velocityOnlyDisplacement, 1.0)
+        requireNear(velocityOnly.velocity / testCase.velocityOnlyVelocity, 1.0)
+
+        listOf(-320.0 to 0.0, 0.0 to 1e20, 320.0 to -1e20).forEach { (displacement, velocity) ->
+            val direct = evaluate(spring, displacement, velocity, 1.0 / 120.0)
+            val opposite = evaluate(spring, -displacement, -velocity, 1.0 / 120.0)
+            requireNear(opposite.displacement / -direct.displacement, 1.0)
+            requireNear(opposite.velocity / -direct.velocity, 1.0)
+            val first = evaluate(spring, displacement, velocity, 1.0 / 360.0)
+            val resumed = evaluate(spring, first.displacement, first.velocity, 1.0 / 180.0)
+            requireNear(resumed.displacement / direct.displacement, 1.0)
+            requireNear(resumed.velocity / direct.velocity, 1.0)
+        }
+    }
+    val settled = evaluate(resolveSideDrawerSpring(1.0, 1e308, 2e154), -320.0, 0.0, 1.0 / 120.0)
+    check(settled.displacement == 0.0 && settled.velocity == 0.0)
+}
+
+private fun verifySpringScaleEquivalence() {
+    listOf(1e-308, 1e-150, 1.0, 1e150, 1e308).forEach { stiffness ->
+        val frequency = kotlin.math.sqrt(stiffness)
+        listOf(0.1, 1.0, 10.0).forEach { dampingRatio ->
+            val spring = resolveSideDrawerSpring(1.0, stiffness, 2.0 * dampingRatio * frequency)
+            val normalizedSpring = resolveSideDrawerSpring(1.0, 1.0, 2.0 * dampingRatio)
+            listOf(0.01, 0.1, 1.0, 10.0, 100.0).forEach { normalizedTime ->
+                val actual = evaluate(spring, -320.0, 23.0 * frequency, normalizedTime / frequency)
+                val expected = evaluate(normalizedSpring, -320.0, 23.0, normalizedTime)
+                requireNear(actual.displacement, expected.displacement)
+                requireNear(actual.velocity / frequency, expected.velocity)
+            }
+        }
+    }
 }
 
 private fun verifyConfiguredInteraction() {
@@ -329,6 +384,8 @@ fun main() {
     verifyInitialConditionsAndSemigroup()
     verifyNearCriticalContinuity()
     verifySpringRepresentation()
+    verifyExtremeSpringTransfer()
+    verifySpringScaleEquivalence()
     verifyConfiguredInteraction()
     verifyReleaseVelocityLimit()
     verifyWidthStateRemapping()

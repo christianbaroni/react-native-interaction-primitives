@@ -192,41 +192,50 @@ internal fun evaluateSideDrawerSpring(
     // solution through its unit-velocity response avoids the large opposing
     // modal coefficients that become ill-conditioned near critical damping
     // and can overflow for otherwise representable overdamped springs.
-    val phaseResponse: Double
+    val displacementResponse: Double
+    val velocityResponse: Double
     val unitVelocityResponse: Double
     when (spring.dampingType) {
         SideDrawerDampingType.Underdamped -> {
             val angle = spring.responseRate * elapsed
             val decay = exp(-spring.dampingRate * elapsed)
             val sinc = if (angle == 0.0) 1.0 else sin(angle) / angle
-            phaseResponse = decay * cos(angle)
+            val phaseResponse = decay * cos(angle)
             unitVelocityResponse = decay * elapsed * sinc
+            val dampingResponse = spring.dampingRate * unitVelocityResponse
+            displacementResponse = phaseResponse + dampingResponse
+            velocityResponse = phaseResponse - dampingResponse
         }
         SideDrawerDampingType.Overdamped -> {
             val slowRate = -spring.naturalFrequencySquared / (spring.dampingRate + spring.responseRate)
             val slowDecay = exp(slowRate * elapsed)
             val angle = spring.responseRate * elapsed
             val relativeFastDecay = exp(-2.0 * angle)
-            phaseResponse = slowDecay * (1.0 + relativeFastDecay) / 2.0
             unitVelocityResponse = if (angle == 0.0) {
                 slowDecay * elapsed
             } else {
                 slowDecay * -expm1(-2.0 * angle) / (2.0 * spring.responseRate)
             }
+            // Keep the slow tail out of a subtraction of nearly equal terms.
+            val slowResponse = slowRate * unitVelocityResponse
+            displacementResponse = slowDecay - slowResponse
+            velocityResponse = slowDecay * relativeFastDecay + slowResponse
         }
         SideDrawerDampingType.CriticallyDamped -> {
             val decay = exp(-spring.dampingRate * elapsed)
-            phaseResponse = decay
             unitVelocityResponse = decay * elapsed
+            val dampingResponse = spring.dampingRate * unitVelocityResponse
+            displacementResponse = decay + dampingResponse
+            velocityResponse = decay - dampingResponse
         }
     }
 
+    // Form the restoring response before scaling by displacement to avoid overflow.
     result.displacement =
-        initialDisplacement * (phaseResponse + spring.dampingRate * unitVelocityResponse) +
-        initialVelocity * unitVelocityResponse
+        initialDisplacement * displacementResponse + initialVelocity * unitVelocityResponse
     result.velocity =
-        initialVelocity * (phaseResponse - spring.dampingRate * unitVelocityResponse) -
-        spring.naturalFrequencySquared * initialDisplacement * unitVelocityResponse
+        initialVelocity * velocityResponse -
+        initialDisplacement * (spring.naturalFrequencySquared * unitVelocityResponse)
 }
 
 internal fun limitSideDrawerReleaseVelocity(

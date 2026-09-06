@@ -20,6 +20,7 @@ constexpr double kAbsoluteTolerance = 2e-11;
 
 bool nearlyEqual(double actual, double expected, double relative = kRelativeTolerance, double absolute = kAbsoluteTolerance)
 {
+  if (!std::isfinite(actual) || !std::isfinite(expected)) return false;
   const double scale = std::max({1.0, std::abs(actual), std::abs(expected)});
   return std::abs(actual - expected) <= std::max(absolute, relative * scale);
 }
@@ -171,6 +172,61 @@ void verifySpringRepresentation()
   requireNear(overflow.damping, 46);
 }
 
+void verifyExtremeSpringTransfer()
+{
+  struct Case {
+    double damping;
+    SpringState restoring;
+    SpringState velocityOnly;
+  };
+  // Modal solutions evaluated at 800-digit precision from the admitted double inputs.
+  const std::array<Case, 2> cases = {{
+      {1e307, {-294.41421268138345, 2944.1421268138342}, {9.200444146293232e-288, -9.200444146293233e-287}},
+      {1.7e307, {-304.691987092261, 1792.305806425065}, {5.600955645078327e-288, -3.2946797912225456e-287}},
+  }};
+  for (const Case &testCase : cases) {
+    const Spring spring = resolveSpring(1, 1e308, testCase.damping);
+    requireNear(spring.stiffness, 1e308);
+    requireNear(spring.damping, testCase.damping);
+    const SpringState restoring = rnsidedrawer::evaluateSpring(spring, -320, 0, 1.0 / 120);
+    requireNear(restoring.displacement, testCase.restoring.displacement);
+    requireNear(restoring.velocity, testCase.restoring.velocity);
+    const SpringState velocityOnly = rnsidedrawer::evaluateSpring(spring, 0, 1e20, 1.0 / 120);
+    requireNear(velocityOnly.displacement / testCase.velocityOnly.displacement, 1);
+    requireNear(velocityOnly.velocity / testCase.velocityOnly.velocity, 1);
+
+    for (SpringState initial : {SpringState{-320, 0}, SpringState{0, 1e20}, SpringState{320, -1e20}}) {
+      const SpringState direct = rnsidedrawer::evaluateSpring(spring, initial.displacement, initial.velocity, 1.0 / 120);
+      const SpringState opposite = rnsidedrawer::evaluateSpring(spring, -initial.displacement, -initial.velocity, 1.0 / 120);
+      requireNear(opposite.displacement / -direct.displacement, 1);
+      requireNear(opposite.velocity / -direct.velocity, 1);
+      const SpringState first = rnsidedrawer::evaluateSpring(spring, initial.displacement, initial.velocity, 1.0 / 360);
+      const SpringState resumed = rnsidedrawer::evaluateSpring(spring, first.displacement, first.velocity, 1.0 / 180);
+      requireNear(resumed.displacement / direct.displacement, 1);
+      requireNear(resumed.velocity / direct.velocity, 1);
+    }
+  }
+  const SpringState settled = rnsidedrawer::evaluateSpring(resolveSpring(1, 1e308, 2e154), -320, 0, 1.0 / 120);
+  assert(settled.displacement == 0 && settled.velocity == 0);
+}
+
+void verifySpringScaleEquivalence()
+{
+  for (double stiffness : {1e-308, 1e-150, 1.0, 1e150, 1e308}) {
+    const double frequency = std::sqrt(stiffness);
+    for (double dampingRatio : {0.1, 1.0, 10.0}) {
+      const Spring spring = resolveSpring(1, stiffness, 2 * dampingRatio * frequency);
+      const Spring normalizedSpring = resolveSpring(1, 1, 2 * dampingRatio);
+      for (double normalizedTime : {0.01, 0.1, 1.0, 10.0, 100.0}) {
+        const SpringState actual = rnsidedrawer::evaluateSpring(spring, -320, 23 * frequency, normalizedTime / frequency);
+        const SpringState expected = rnsidedrawer::evaluateSpring(normalizedSpring, -320, 23, normalizedTime);
+        requireNear(actual.displacement, expected.displacement);
+        requireNear(actual.velocity / frequency, expected.velocity);
+      }
+    }
+  }
+}
+
 void verifyReleaseVelocityLimit()
 {
   constexpr double limitDistance = 32;
@@ -282,6 +338,8 @@ int main()
   verifyInitialConditionsAndSemigroup();
   verifyNearCriticalContinuity();
   verifySpringRepresentation();
+  verifyExtremeSpringTransfer();
+  verifySpringScaleEquivalence();
   verifyReleaseVelocityLimit();
   verifyWidthStateRemapping();
   verifyOverdragDerivative();
