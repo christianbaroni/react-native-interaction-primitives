@@ -1854,7 +1854,7 @@ PODS:
     - React-utils (= 0.84.1)
     - ReactNativeDependencies
   - ReactNativeDependencies (0.84.1)
-  - RNInteractionPrimitives (0.5.0):
+  - RNInteractionPrimitives (0.6.0):
     - hermes-engine
     - RCTRequired
     - RCTTypeSafety
@@ -2183,7 +2183,7 @@ SPEC CHECKSUMS:
   ReactCodegen: 797de5178718324c6eba3327b07f9a423fbd5787
   ReactCommon: 07572bf9e687c8a52fbe4a3641e9e3a1a477c78e
   ReactNativeDependencies: bbfeec5f1bb1e339eb7a0e232df9ddc82545f8b6
-  RNInteractionPrimitives: cb57b2edc9bdbf8171cb702f4762f381f0aee73d
+  RNInteractionPrimitives: b4dae6b34a019a70f52b6f1d428b45ecfe8bb04d
   Yoga: c0b3f2c7e8d3e327e450223a2414ca3fa296b9a2
 
 PODFILE CHECKSUM: a5de45e2350a9515567a6e18ca8ceea718b48523
