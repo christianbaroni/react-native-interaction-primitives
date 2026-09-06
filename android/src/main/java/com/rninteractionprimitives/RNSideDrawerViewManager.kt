@@ -4,9 +4,11 @@ import android.view.View
 import com.facebook.react.bridge.ReadableArray
 import com.facebook.react.module.annotations.ReactModule
 import com.facebook.react.uimanager.PixelUtil
+import com.facebook.react.uimanager.PointerEvents
 import com.facebook.react.uimanager.ThemedReactContext
 import com.facebook.react.uimanager.ViewGroupManager
 import com.facebook.react.uimanager.ViewManagerDelegate
+import com.facebook.react.uimanager.ViewProps
 import com.facebook.react.uimanager.annotations.ReactProp
 import com.facebook.react.viewmanagers.RNSideDrawerViewManagerDelegate
 import com.facebook.react.viewmanagers.RNSideDrawerViewManagerInterface
@@ -16,7 +18,23 @@ internal class RNSideDrawerViewManager :
     ViewGroupManager<RNSideDrawerView>(),
     RNSideDrawerViewManagerInterface<RNSideDrawerView> {
     private val delegate: ViewManagerDelegate<RNSideDrawerView> =
-        RNSideDrawerViewManagerDelegate<RNSideDrawerView, RNSideDrawerViewManager>(this)
+        object : ViewManagerDelegate<RNSideDrawerView> {
+            private val generated =
+                RNSideDrawerViewManagerDelegate<RNSideDrawerView, RNSideDrawerViewManager>(this@RNSideDrawerViewManager)
+
+            override fun setProperty(view: RNSideDrawerView, propName: String, value: Any?) {
+                // The generated delegate does not dispatch this inherited view prop.
+                if (propName == ViewProps.POINTER_EVENTS) {
+                    setPointerEvents(view, value as String?)
+                } else {
+                    generated.setProperty(view, propName, value)
+                }
+            }
+
+            override fun receiveCommand(view: RNSideDrawerView, commandName: String, args: ReadableArray) {
+                generated.receiveCommand(view, commandName, args)
+            }
+        }
 
     override fun getName(): String = REACT_CLASS
 
@@ -56,6 +74,11 @@ internal class RNSideDrawerViewManager :
         constants["topOpenChange"] = mutableMapOf("registrationName" to "onOpenChange")
         constants["topProgress"] = mutableMapOf("registrationName" to "onProgress")
         return constants
+    }
+
+    @ReactProp(name = ViewProps.POINTER_EVENTS)
+    fun setPointerEvents(view: RNSideDrawerView, value: String?) {
+        view.pointerEvents = PointerEvents.parsePointerEvents(value)
     }
 
     @ReactProp(name = "drawerWidth")

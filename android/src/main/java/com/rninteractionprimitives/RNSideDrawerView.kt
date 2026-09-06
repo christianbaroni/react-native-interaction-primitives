@@ -16,6 +16,8 @@ import androidx.activity.OnBackPressedDispatcherOwner
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.ReadableArray
 import com.facebook.react.bridge.WritableMap
+import com.facebook.react.uimanager.PointerEvents
+import com.facebook.react.uimanager.ReactPointerEventsView
 import com.facebook.react.uimanager.ThemedReactContext
 import com.facebook.react.uimanager.UIManagerHelper
 import kotlin.math.abs
@@ -23,7 +25,8 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
 
-internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : ViewGroup(reactContext) {
+internal class RNSideDrawerView(private val reactContext: ThemedReactContext) :
+    ViewGroup(reactContext), ReactPointerEventsView {
     enum class Side {
         Start,
         End,
@@ -230,20 +233,28 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
             contentPresentationView.setShadowElevation(next)
         }
 
+    override var pointerEvents: PointerEvents = PointerEvents.AUTO
+        set(value) {
+            if (field == value) return
+            field = value
+            if (!PointerEvents.canBeTouchTarget(value)) {
+                if (isDragging || !PointerEvents.canChildrenBeTouchTarget(value)) {
+                    settleCancelledDrag()
+                    clearTouchTracking()
+                } else {
+                    yieldGestureToDescendant()
+                }
+            } else if (!PointerEvents.canChildrenBeTouchTarget(value)) {
+                requestDisallowInterceptTouchEvent(false)
+            }
+        }
+
     var gestureEnabled: Boolean = true
         set(value) {
             if (field == value) return
             field = value
             if (!value) {
-                if (isDragging) {
-                    startTransition(
-                        revealProgress() >= activeInteraction.releaseOpenThreshold,
-                        SettlingSource.Release,
-                        true,
-                        0.0,
-                        activeInteraction,
-                    )
-                }
+                settleCancelledDrag()
                 clearTouchTracking()
             }
         }
@@ -330,6 +341,10 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
             finishTouch(event)
         }
         return handled
+    }
+
+    override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {
+        return PointerEvents.canChildrenBeTouchTarget(pointerEvents) && super.dispatchGenericMotionEvent(event)
     }
 
     override fun requestDisallowInterceptTouchEvent(disallowIntercept: Boolean) {
@@ -419,22 +434,25 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
     }
 
     override fun onInterceptTouchEvent(event: MotionEvent): Boolean {
-        if (!gestureEnabled || laidOutDrawerWidthPx <= 0f) return false
+        val interceptChildren = !PointerEvents.canChildrenBeTouchTarget(pointerEvents)
+        if (!PointerEvents.canBeTouchTarget(pointerEvents) || !gestureEnabled || laidOutDrawerWidthPx <= 0f) {
+            return interceptChildren
+        }
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 gestureEligible = true
                 initializeTouch(event)
             }
             MotionEvent.ACTION_MOVE -> {
-                if (!gestureEligible) return false
+                if (!gestureEligible) return interceptChildren
                 val pointerIndex = event.findPointerIndex(activePointerId)
-                if (pointerIndex < 0) return false
+                if (pointerIndex < 0) return interceptChildren
                 val deltaX = event.getX(pointerIndex) - downX
                 val deltaY = event.getY(pointerIndex) - downY
                 val revealDelta = deltaX * openingDirection()
                 val drawerCanMove = canMoveInDirection(revealDelta)
                 val horizontalIntent = abs(deltaX) > touchSlop && abs(deltaX) > abs(deltaY)
-                if (horizontalIntent && touchedDescendantCanScrollHorizontally(deltaX)) {
+                if (!interceptChildren && horizontalIntent && touchedDescendantCanScrollHorizontally(deltaX)) {
                     yieldGestureToDescendant()
                     return false
                 }
@@ -453,11 +471,12 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
                 finishTouch(event)
             }
         }
-        return false
+        return interceptChildren
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        if (!gestureEnabled || !gestureEligible) return false
+        if (!PointerEvents.canBeTouchTarget(pointerEvents)) return false
+        if (!gestureEnabled || !gestureEligible) return true
         if (event.actionMasked == MotionEvent.ACTION_DOWN) return true
         when (event.actionMasked) {
             MotionEvent.ACTION_MOVE -> {
@@ -502,15 +521,7 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
                 return true
             }
             MotionEvent.ACTION_CANCEL -> {
-                if (isDragging) {
-                    startTransition(
-                        revealProgress() >= activeInteraction.releaseOpenThreshold,
-                        SettlingSource.Release,
-                        true,
-                        0.0,
-                        activeInteraction,
-                    )
-                }
+                settleCancelledDrag()
                 finishTouch(event)
                 return true
             }
@@ -610,6 +621,7 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
         stopTransitionAnimation()
         setHighFrameRateRequested(false)
         cancelTouchInteraction()
+        pointerEvents = PointerEvents.AUTO
         contentView?.onScrimPress = null
         panelView?.let { super.removeView(it) }
         contentView?.let { contentPresentationView.removeContentView(it) }
@@ -672,6 +684,17 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
             velocityLimitDistancePx.toDouble(),
         )
         startTransition(nextOpen, SettlingSource.Release, true, initialVelocity, interaction)
+    }
+
+    private fun settleCancelledDrag() {
+        if (!isDragging) return
+        startTransition(
+            revealProgress() >= activeInteraction.releaseOpenThreshold,
+            SettlingSource.Release,
+            true,
+            0.0,
+            activeInteraction,
+        )
     }
 
     private fun startTransition(
