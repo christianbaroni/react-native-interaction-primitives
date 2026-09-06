@@ -2,7 +2,11 @@ import * as React from 'react';
 import { StyleSheet, View } from 'react-native';
 import NativeSideDrawerContentView from './specs/RNSideDrawerContentViewNativeComponent';
 import NativeSideDrawerPanelView from './specs/RNSideDrawerPanelViewNativeComponent';
-import NativeSideDrawerView, { Commands, type NativeSideDrawerOpenChange } from './specs/RNSideDrawerViewNativeComponent';
+import NativeSideDrawerView, {
+  Commands,
+  type NativeSideDrawerTransitionEnd,
+  type NativeSideDrawerTransitionStart,
+} from './specs/RNSideDrawerViewNativeComponent';
 import { compileSideDrawerMotion } from './sideDrawerMotion';
 import type { SideDrawerCommandOptions, SideDrawerProps, SideDrawerRef } from './types';
 
@@ -81,8 +85,14 @@ class SideDrawerImplementation extends React.PureComponent<SideDrawerProps> impl
     this.nativeRef = ref;
   };
 
-  private handleOpenChange = (event: NativeSideDrawerEvent<NativeSideDrawerOpenChange>) => {
-    this.props.onOpenChange?.(event.nativeEvent.open);
+  private handleTransitionEnd = (event: NativeSideDrawerEvent<NativeSideDrawerTransitionEnd>) => {
+    const { open, changed } = event.nativeEvent;
+    if (changed) this.props.onOpenChange?.(open);
+    this.props.onTransitionEnd?.(open);
+  };
+
+  private handleTransitionStart = (event: NativeSideDrawerEvent<NativeSideDrawerTransitionStart>) => {
+    this.props.onTransitionStart?.(event.nativeEvent.open);
   };
 
   private motionConfigFor(motion: SideDrawerProps['motion']): readonly number[] {
@@ -107,6 +117,8 @@ class SideDrawerImplementation extends React.PureComponent<SideDrawerProps> impl
       motion,
       onOpenChange,
       onProgress,
+      onTransitionEnd,
+      onTransitionStart,
       side = 'start',
       topProgress,
       ...props
@@ -167,9 +179,9 @@ class SideDrawerImplementation extends React.PureComponent<SideDrawerProps> impl
         initialOpen={initialOpen}
         motionConfig={motionConfig}
         overdrag={overdrag}
-        onOpenChange={onOpenChange ? this.handleOpenChange : undefined}
         onProgress={onProgress}
-        openChangeEventsEnabled={onOpenChange != null}
+        onTransitionEnd={onTransitionEnd || onOpenChange ? this.handleTransitionEnd : undefined}
+        onTransitionStart={onTransitionStart ? this.handleTransitionStart : undefined}
         overlayColor={motion?.overlay?.color ?? 'transparent'}
         progressEventsEnabled={onProgress != null || topProgress != null}
         releaseOpenThreshold={releaseOpenThreshold}
@@ -180,6 +192,8 @@ class SideDrawerImplementation extends React.PureComponent<SideDrawerProps> impl
         springDamping={springDamping}
         springMass={springMass}
         springStiffness={springStiffness}
+        transitionEndEventsEnabled={onTransitionEnd != null || onOpenChange != null}
+        transitionStartEventsEnabled={onTransitionStart != null}
       >
         <NativeSideDrawerPanelView collapsable={false} style={styles.panel}>
           <View

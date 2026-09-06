@@ -71,8 +71,9 @@ internal class RNSideDrawerViewManager :
 
     override fun getExportedCustomDirectEventTypeConstants(): MutableMap<String, Any> {
         val constants = super.getExportedCustomDirectEventTypeConstants() ?: HashMap()
-        constants["topOpenChange"] = mutableMapOf("registrationName" to "onOpenChange")
         constants["topProgress"] = mutableMapOf("registrationName" to "onProgress")
+        constants["topTransitionEnd"] = mutableMapOf("registrationName" to "onTransitionEnd")
+        constants["topTransitionStart"] = mutableMapOf("registrationName" to "onTransitionStart")
         return constants
     }
 
@@ -140,11 +141,6 @@ internal class RNSideDrawerViewManager :
         view.setMotionConfig(value)
     }
 
-    @ReactProp(name = "openChangeEventsEnabled", defaultBoolean = false)
-    override fun setOpenChangeEventsEnabled(view: RNSideDrawerView, value: Boolean) {
-        view.openChangeEventsEnabled = value
-    }
-
     @ReactProp(name = "overdrag", defaultDouble = 4.0)
     override fun setOverdrag(view: RNSideDrawerView, value: Double) {
         view.overdragPx = PixelUtil.toPixelFromDIP(value)
@@ -193,6 +189,16 @@ internal class RNSideDrawerViewManager :
     @ReactProp(name = "springStiffness", defaultDouble = DEFAULT_SIDE_DRAWER_SPRING_STIFFNESS)
     override fun setSpringStiffness(view: RNSideDrawerView, value: Double) {
         view.springStiffness = value
+    }
+
+    @ReactProp(name = "transitionEndEventsEnabled", defaultBoolean = false)
+    override fun setTransitionEndEventsEnabled(view: RNSideDrawerView, value: Boolean) {
+        view.transitionEndEventsEnabled = value
+    }
+
+    @ReactProp(name = "transitionStartEventsEnabled", defaultBoolean = false)
+    override fun setTransitionStartEventsEnabled(view: RNSideDrawerView, value: Boolean) {
+        view.transitionStartEventsEnabled = value
     }
 
     override fun close(view: RNSideDrawerView, animated: Boolean) {

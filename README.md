@@ -149,6 +149,14 @@ The ref exposes `open`, `close`, and `toggle`; each accepts `{ animated?: boolea
 - `side?: 'start' | 'end'` — logical drawer side, resolved through native layout direction.
 - `onOpenChange?: (open) => void` — reports a completed endpoint change.
 - `onProgress?: (event) => void` — reports normalized progress and native phase. Both platforms skip payload construction when this observer is absent.
+- `onTransitionStart?: (open) => void` — reports the destination committed by a command, gesture release, or cancellation: `true` means opening, `false` means closing.
+- `onTransitionEnd?: (open) => void` — reports full transition completion, including a return to the starting endpoint.
+
+`onTransitionStart(true/false)` covers `onWillOpen` / `onWillClose`; `onTransitionEnd(true/false)` covers `onDidOpen` / `onDidClose`. A gesture chooses its destination when released or cancelled, not when the finger first moves. An interrupted transition does not emit an end callback for its abandoned destination. A replacement command or subsequent release emits a new start callback.
+
+Nonanimated commands and releases already at rest emit start followed by end without waiting for an animation. Commands before the first layout also apply immediately. Initial state, no-op commands, and layout-driven animation restarts do not emit start callbacks. A command that immediately finishes an ongoing animation is a new commitment and emits both callbacks. Unmounting cancels observation; it does not guarantee a completion callback.
+
+`onOpenChange` runs before `onTransitionEnd` when the completed endpoint differs from the previous completed endpoint. For example, dragging a closed drawer partway open and releasing it back closed emits start/end with `false`, but no `onOpenChange`. Lifecycle callbacks do not enable per-frame progress delivery.
 
 In Android apps targeting API 36 or later, system back—including gesture navigation from either edge—closes an open drawer before app navigation. Back passes through normally while the drawer is closed.
 

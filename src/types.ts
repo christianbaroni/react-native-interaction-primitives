@@ -145,8 +145,13 @@ export type SideDrawerProps = ViewProps & {
   initialOpen?: boolean;
   interaction?: SideDrawerInteraction;
   motion?: SideDrawerMotion;
+  /** Reports a completed change of the settled open/closed value. */
   onOpenChange?: (open: boolean) => void;
   onProgress?: (event: SideDrawerProgressNativeEvent) => void;
+  /** Reports each completed transition, including a return to the starting endpoint. */
+  onTransitionEnd?: (open: boolean) => void;
+  /** Reports a destination committed by a command, gesture release, or cancellation. */
+  onTransitionStart?: (open: boolean) => void;
   side?: 'start' | 'end';
 };
 

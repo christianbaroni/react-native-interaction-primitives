@@ -48,21 +48,53 @@ describe('SideDrawer API', () => {
 
   it('derives native event gates from attached observers', () => {
     const { rerender } = render(drawer());
-    expect(lastNativeProps('RNSideDrawerView').openChangeEventsEnabled).toBe(false);
+    expect(lastNativeProps('RNSideDrawerView').transitionStartEventsEnabled).toBe(false);
+    expect(lastNativeProps('RNSideDrawerView').transitionEndEventsEnabled).toBe(false);
     expect(lastNativeProps('RNSideDrawerView').progressEventsEnabled).toBe(false);
 
     rerender(drawer(undefined, { onOpenChange: vi.fn(), onProgress: vi.fn() }));
-    expect(lastNativeProps('RNSideDrawerView').openChangeEventsEnabled).toBe(true);
+    expect(lastNativeProps('RNSideDrawerView').transitionStartEventsEnabled).toBe(false);
+    expect(lastNativeProps('RNSideDrawerView').transitionEndEventsEnabled).toBe(true);
     expect(lastNativeProps('RNSideDrawerView').progressEventsEnabled).toBe(true);
+
+    rerender(drawer(undefined, { onTransitionStart: vi.fn() }));
+    expect(lastNativeProps('RNSideDrawerView').transitionStartEventsEnabled).toBe(true);
+    expect(lastNativeProps('RNSideDrawerView').transitionEndEventsEnabled).toBe(false);
+    expect(lastNativeProps('RNSideDrawerView').progressEventsEnabled).toBe(false);
+
+    rerender(drawer(undefined, { onTransitionEnd: vi.fn() }));
+    expect(lastNativeProps('RNSideDrawerView').transitionStartEventsEnabled).toBe(false);
+    expect(lastNativeProps('RNSideDrawerView').transitionEndEventsEnabled).toBe(true);
+    expect(lastNativeProps('RNSideDrawerView').progressEventsEnabled).toBe(false);
   });
 
-  it('narrows the native open-change event to the settled boolean', () => {
+  it('reports every transition boundary and only changed settled values', () => {
+    const events: string[] = [];
+    const { rerender } = render(
+      drawer(undefined, {
+        onOpenChange: open => events.push(`change:${open}`),
+        onTransitionEnd: open => events.push(`end:${open}`),
+        onTransitionStart: open => events.push(`start:${open}`),
+      })
+    );
+    const props = lastNativeProps('RNSideDrawerView');
+    callNativeEvent(props.onTransitionStart, { open: false });
+    callNativeEvent(props.onTransitionEnd, { open: false, changed: false });
+    callNativeEvent(props.onTransitionStart, { open: true });
+    callNativeEvent(props.onTransitionEnd, { open: true, changed: true });
+    expect(events).toEqual(['start:false', 'end:false', 'start:true', 'change:true', 'end:true']);
+
     const onOpenChange = vi.fn();
-    render(drawer(undefined, { onOpenChange }));
+    rerender(drawer(undefined, { onOpenChange }));
+    expect(lastNativeProps('RNSideDrawerView').onTransitionEnd).toBe(props.onTransitionEnd);
+    callNativeEvent(props.onTransitionEnd, { open: false, changed: false });
+    expect(onOpenChange).not.toHaveBeenCalled();
+    callNativeEvent(props.onTransitionEnd, { open: false, changed: true });
+    expect(onOpenChange).toHaveBeenCalledExactlyOnceWith(false);
 
-    callNativeEvent(lastNativeProps('RNSideDrawerView').onOpenChange, { open: true });
-
-    expect(onOpenChange).toHaveBeenCalledWith(true);
+    rerender(drawer());
+    expect(lastNativeProps('RNSideDrawerView').onTransitionStart).toBeUndefined();
+    expect(lastNativeProps('RNSideDrawerView').onTransitionEnd).toBeUndefined();
   });
 
   it('validates product geometry before crossing the native boundary', () => {

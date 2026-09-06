@@ -210,14 +210,24 @@ static NSString *RNSideDrawerHapticValue(RNSideDrawerViewGestureReleaseHaptic va
     _drawerView = [[RNSideDrawerView alloc] initWithFrame:self.bounds];
     _drawerView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     __weak RNSideDrawerViewComponentView *weakSelf = self;
-    _drawerView.openChangeHandler = ^(NSDictionary *payload) {
+    _drawerView.transitionStartHandler = ^(NSDictionary *payload) {
       RNSideDrawerViewComponentView *strongSelf = weakSelf;
       if (strongSelf == nil) return;
       auto emitter = std::static_pointer_cast<const RNSideDrawerViewEventEmitter>(strongSelf->_eventEmitter);
       if (emitter == nullptr) return;
-      RNSideDrawerViewEventEmitter::OnOpenChange event{};
+      RNSideDrawerViewEventEmitter::OnTransitionStart event{};
       event.open = [payload[@"open"] boolValue];
-      emitter->onOpenChange(event);
+      emitter->onTransitionStart(event);
+    };
+    _drawerView.transitionEndHandler = ^(NSDictionary *payload) {
+      RNSideDrawerViewComponentView *strongSelf = weakSelf;
+      if (strongSelf == nil) return;
+      auto emitter = std::static_pointer_cast<const RNSideDrawerViewEventEmitter>(strongSelf->_eventEmitter);
+      if (emitter == nullptr) return;
+      RNSideDrawerViewEventEmitter::OnTransitionEnd event{};
+      event.open = [payload[@"open"] boolValue];
+      event.changed = [payload[@"changed"] boolValue];
+      emitter->onTransitionEnd(event);
     };
     _drawerView.progressHandler = ^(NSDictionary *payload) {
       RNSideDrawerViewComponentView *strongSelf = weakSelf;
@@ -290,9 +300,6 @@ static NSString *RNSideDrawerHapticValue(RNSideDrawerViewGestureReleaseHaptic va
     for (Float value : newViewProps.motionConfig) [config addObject:@(value)];
     _drawerView.motionConfig = config;
   }
-  if (oldViewProps.openChangeEventsEnabled != newViewProps.openChangeEventsEnabled) {
-    _drawerView.openChangeEventsEnabled = newViewProps.openChangeEventsEnabled;
-  }
   if (oldViewProps.overdrag != newViewProps.overdrag) {
     _drawerView.overdrag = newViewProps.overdrag;
   }
@@ -324,6 +331,12 @@ static NSString *RNSideDrawerHapticValue(RNSideDrawerViewGestureReleaseHaptic va
   }
   if (oldViewProps.springStiffness != newViewProps.springStiffness) {
     _drawerView.springStiffness = newViewProps.springStiffness;
+  }
+  if (oldViewProps.transitionEndEventsEnabled != newViewProps.transitionEndEventsEnabled) {
+    _drawerView.transitionEndEventsEnabled = newViewProps.transitionEndEventsEnabled;
+  }
+  if (oldViewProps.transitionStartEventsEnabled != newViewProps.transitionStartEventsEnabled) {
+    _drawerView.transitionStartEventsEnabled = newViewProps.transitionStartEventsEnabled;
   }
   [super updateProps:props oldProps:oldProps];
 }
@@ -431,7 +444,6 @@ RCT_EXPORT_VIEW_PROPERTY(gestureEnabled, BOOL)
 RCT_EXPORT_VIEW_PROPERTY(gestureReleaseHaptic, NSString)
 RCT_EXPORT_VIEW_PROPERTY(initialOpen, BOOL)
 RCT_EXPORT_VIEW_PROPERTY(motionConfig, NSArray)
-RCT_EXPORT_VIEW_PROPERTY(openChangeEventsEnabled, BOOL)
 RCT_EXPORT_VIEW_PROPERTY(overdrag, CGFloat)
 RCT_EXPORT_VIEW_PROPERTY(overlayColor, UIColor)
 RCT_EXPORT_VIEW_PROPERTY(progressEventsEnabled, BOOL)
@@ -441,8 +453,11 @@ RCT_EXPORT_VIEW_PROPERTY(releaseVelocityTransfer, CGFloat)
 RCT_EXPORT_VIEW_PROPERTY(springDamping, CGFloat)
 RCT_EXPORT_VIEW_PROPERTY(springMass, CGFloat)
 RCT_EXPORT_VIEW_PROPERTY(springStiffness, CGFloat)
-RCT_EXPORT_VIEW_PROPERTY(onOpenChange, RCTDirectEventBlock)
+RCT_EXPORT_VIEW_PROPERTY(transitionEndEventsEnabled, BOOL)
+RCT_EXPORT_VIEW_PROPERTY(transitionStartEventsEnabled, BOOL)
 RCT_EXPORT_VIEW_PROPERTY(onProgress, RCTDirectEventBlock)
+RCT_EXPORT_VIEW_PROPERTY(onTransitionEnd, RCTDirectEventBlock)
+RCT_EXPORT_VIEW_PROPERTY(onTransitionStart, RCTDirectEventBlock)
 
 RCT_CUSTOM_VIEW_PROPERTY(contentShadowElevation, CGFloat, RNSideDrawerView)
 {

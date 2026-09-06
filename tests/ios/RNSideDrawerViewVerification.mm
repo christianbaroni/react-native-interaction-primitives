@@ -20,6 +20,18 @@
 - (void)handleContactBegin;
 @end
 
+@interface CallbackVerificationDrawer : RNSideDrawerView
+@property (nonatomic, assign) CGFloat panTranslation;
+@end
+
+@implementation CallbackVerificationDrawer
+// Control gesture input while exercising the native callbacks and actual animator.
+- (CGFloat)dragTranslation
+{
+  return self.panTranslation;
+}
+@end
+
 static UIViewPropertyAnimator *waitForAnimation(RNSideDrawerView *drawer)
 {
   UIView *pane = [drawer valueForKey:@"contentPresentationView"];
@@ -200,12 +212,141 @@ static void verifyAnimatedInteractions()
   window.hidden = YES;
 }
 
+static void waitForSettle(RNSideDrawerView *drawer)
+{
+  [CATransaction flush];
+  CFTimeInterval deadline = CACurrentMediaTime() + 2;
+  while ([[drawer valueForKey:@"transitionActive"] boolValue] && CACurrentMediaTime() < deadline) {
+    [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.005]];
+  }
+  assert(![[drawer valueForKey:@"transitionActive"] boolValue]);
+}
+
+static void endPan(CallbackVerificationDrawer *drawer, CGFloat translation, bool cancelled)
+{
+  UIScrollView *scroll = [drawer valueForKey:@"scrollView"];
+  id<UIScrollViewDelegate> delegate = (id<UIScrollViewDelegate>)drawer;
+  drawer.panTranslation = 0;
+  [delegate scrollViewWillBeginDragging:scroll];
+  drawer.panTranslation = translation;
+  if (!cancelled) {
+    CGPoint targetOffset = scroll.contentOffset;
+    [delegate scrollViewWillEndDragging:scroll withVelocity:CGPointZero targetContentOffset:&targetOffset];
+  }
+  [delegate scrollViewDidEndDragging:scroll willDecelerate:NO];
+}
+
+static void verifyTransitionCallbacks(bool paper)
+{
+  UIWindow *window = [[UIWindow alloc] initWithFrame:CGRectMake(0, 0, 200, 200)];
+  UIViewController *controller = [[UIViewController alloc] init];
+  window.rootViewController = controller;
+  [window makeKeyAndVisible];
+  CallbackVerificationDrawer *drawer = [[CallbackVerificationDrawer alloc] initWithFrame:window.bounds];
+  drawer.drawerWidth = 120;
+  drawer.initialOpen = YES;
+  NSMutableArray<NSString *> *events = [NSMutableArray array];
+  void (^start)(NSDictionary *) = ^(NSDictionary *event) {
+    [events addObject:[NSString stringWithFormat:@"start:%d", [event[@"open"] boolValue]]];
+  };
+  void (^end)(NSDictionary *) = ^(NSDictionary *event) {
+    [events addObject:[NSString stringWithFormat:@"end:%d:%d", [event[@"open"] boolValue], [event[@"changed"] boolValue]]];
+  };
+  if (paper) {
+    drawer.onTransitionStart = start;
+    drawer.onTransitionEnd = end;
+  } else {
+    drawer.transitionStartHandler = start;
+    drawer.transitionEndHandler = end;
+  }
+  drawer.transitionStartEventsEnabled = YES;
+  drawer.transitionEndEventsEnabled = YES;
+  assert(events.count == 0);
+  [drawer openAnimated:YES];
+  assert(events.count == 0);
+  [drawer closeAnimated:NO];
+  assert(([events isEqualToArray:@[@"start:0", @"end:0:1"]]));
+  [controller.view addSubview:drawer];
+  [window layoutIfNeeded];
+  [events removeAllObjects];
+  [drawer closeAnimated:YES];
+  assert(events.count == 0);
+
+  drawer.transitionStartEventsEnabled = NO;
+  drawer.transitionEndEventsEnabled = NO;
+  [drawer openAnimated:NO];
+  assert(events.count == 0);
+  drawer.transitionStartEventsEnabled = YES;
+  drawer.transitionEndEventsEnabled = YES;
+  [drawer closeAnimated:NO];
+  assert(([events isEqualToArray:@[@"start:0", @"end:0:1"]]));
+  [events removeAllObjects];
+
+  [drawer openAnimated:YES];
+  [CATransaction flush];
+  waitForAnimation(drawer);
+  assert(([events isEqualToArray:@[@"start:1"]]));
+  assert([drawer valueForKey:@"presentationDisplayLink"] == nil);
+  [drawer openAnimated:YES];
+  drawer.drawerWidth = 140;
+  [drawer layoutIfNeeded];
+  assert(([events isEqualToArray:@[@"start:1"]]));
+  waitForSettle(drawer);
+  assert(([events isEqualToArray:@[@"start:1", @"end:1:1"]]));
+
+  const bool origins[] = {false, true};
+  for (bool originOpen : origins) {
+    if (originOpen) [drawer openAnimated:NO];
+    else [drawer closeAnimated:NO];
+    [events removeAllObjects];
+    endPan(drawer, originOpen ? -25 : 25, false);
+    assert(([events isEqualToArray:@[originOpen ? @"start:1" : @"start:0"]]));
+    waitForSettle(drawer);
+    assert(([events isEqualToArray:originOpen ? @[@"start:1", @"end:1:0"] : @[@"start:0", @"end:0:0"]]));
+    [events removeAllObjects];
+    endPan(drawer, originOpen ? -110 : 110, true);
+    waitForSettle(drawer);
+    assert(([events isEqualToArray:originOpen ? @[@"start:0", @"end:0:1"] : @[@"start:1", @"end:1:1"]]));
+  }
+
+  [drawer closeAnimated:NO];
+  [events removeAllObjects];
+  [drawer openAnimated:YES];
+  [CATransaction flush];
+  waitForAnimation(drawer);
+  [drawer closeAnimated:YES];
+  waitForSettle(drawer);
+  assert(([events isEqualToArray:@[@"start:1", @"start:0", @"end:0:0"]]));
+
+  [events removeAllObjects];
+  [drawer openAnimated:YES];
+  [CATransaction flush];
+  waitForAnimation(drawer);
+  endPan(drawer, -200, false);
+  waitForSettle(drawer);
+  assert(([events isEqualToArray:@[@"start:1", @"start:0", @"end:0:0"]]));
+
+  [events removeAllObjects];
+  [drawer openAnimated:YES];
+  [drawer openAnimated:NO];
+  assert(([events isEqualToArray:@[@"start:1", @"start:1", @"end:1:1"]]));
+  [events removeAllObjects];
+  [drawer closeAnimated:YES];
+  [drawer prepareForRemoval];
+  [drawer removeFromSuperview];
+  [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.04]];
+  assert(([events isEqualToArray:@[@"start:0"]]));
+  window.hidden = YES;
+}
+
 int main()
 {
   @autoreleasepool {
     verifyScrim(false);
     verifyScrim(true);
     verifyAnimatedInteractions();
+    verifyTransitionCallbacks(false);
+    verifyTransitionCallbacks(true);
     std::puts("iOS drawer UIKit verification passed");
   }
 }

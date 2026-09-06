@@ -70,7 +70,6 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) :
     private var settlingSource = SettlingSource.None
     private var open = false
     private var targetOpen = false
-    private var lastEmittedOpen = false
     private var hasLaidOut = false
     private var progressSnapshotPending = false
     private var laidOutDrawerWidthPx = 0f
@@ -270,7 +269,8 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) :
             phase = if (value) Phase.Open else Phase.Closed
         }
 
-    var openChangeEventsEnabled: Boolean = false
+    var transitionStartEventsEnabled: Boolean = false
+    var transitionEndEventsEnabled: Boolean = false
     var progressEventsEnabled: Boolean = false
         set(value) {
             if (field == value) return
@@ -427,7 +427,6 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) :
         } else if (firstLayout) {
             open = initialOpen
             targetOpen = open
-            lastEmittedOpen = open
             phase = if (open) Phase.Open else Phase.Closed
         }
         flushPendingProgressSnapshot()
@@ -534,7 +533,11 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) :
         if (phase == Phase.Settling) synchronizeTransition()
         stopTransitionAnimation()
         when (phase) {
-            Phase.Dragging -> completeTransition(revealProgress() >= 0.5f)
+            Phase.Dragging -> {
+                val nextOpen = revealProgress() >= 0.5f
+                emitTransitionStart(nextOpen)
+                completeTransition(nextOpen)
+            }
             Phase.Settling -> completeTransition(targetOpen)
             Phase.Closed, Phase.Open -> Unit
         }
@@ -646,23 +649,26 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) :
     // Transitions
 
     private fun setOpen(nextOpen: Boolean, animated: Boolean) {
+        if ((phase == Phase.Open && nextOpen) || (phase == Phase.Closed && !nextOpen)) return
         if (!hasLaidOut) {
             if (nextOpen) dismissContentKeyboard()
+            val openChanged = open != nextOpen
             initialOpen = nextOpen
             open = nextOpen
             targetOpen = nextOpen
             phase = if (nextOpen) Phase.Open else Phase.Closed
             requestLayout()
-            emitOpenChangeIfNeeded()
+            emitTransitionStart(nextOpen)
+            emitTransitionEnd(openChanged)
             return
         }
-        if ((phase == Phase.Open && nextOpen) || (phase == Phase.Closed && !nextOpen)) return
         if (animated && phase == Phase.Settling && targetOpen == nextOpen) return
         if (nextOpen) dismissContentKeyboard()
         if (phase == Phase.Settling) synchronizeTransition()
         val initialVelocity = if (phase == Phase.Settling) transitionVelocityPxPerSecond else 0.0
         stopTransitionAnimation()
         if (isDragging) clearTouchTracking()
+        emitTransitionStart(nextOpen)
         startTransition(nextOpen, SettlingSource.Programmatic, animated, initialVelocity)
     }
 
@@ -683,13 +689,16 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) :
             transferredVelocity,
             velocityLimitDistancePx.toDouble(),
         )
+        emitTransitionStart(nextOpen)
         startTransition(nextOpen, SettlingSource.Release, true, initialVelocity, interaction)
     }
 
     private fun settleCancelledDrag() {
         if (!isDragging) return
+        val nextOpen = revealProgress() >= activeInteraction.releaseOpenThreshold
+        emitTransitionStart(nextOpen)
         startTransition(
-            revealProgress() >= activeInteraction.releaseOpenThreshold,
+            nextOpen,
             SettlingSource.Release,
             true,
             0.0,
@@ -784,6 +793,7 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) :
     }
 
     private fun completeTransition(openAtEnd: Boolean) {
+        val openChanged = open != openAtEnd
         stopTransitionAnimation()
         transitionVelocityPxPerSecond = 0.0
         revealPx = targetPosition(openAtEnd)
@@ -793,7 +803,7 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) :
         settlingSource = SettlingSource.None
         applyPresentation()
         publishProgress()
-        emitOpenChangeIfNeeded()
+        emitTransitionEnd(openChanged)
         setHighFrameRateRequested(false)
     }
 
@@ -1077,13 +1087,19 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) :
         dispatchEvent("topProgress", progressPayload(), coalesces = true)
     }
 
-    private fun emitOpenChangeIfNeeded() {
-        if (lastEmittedOpen == open) return
-        lastEmittedOpen = open
-        if (!openChangeEventsEnabled) return
+    private fun emitTransitionStart(openAtEnd: Boolean) {
+        if (!transitionStartEventsEnabled) return
+        val payload = Arguments.createMap()
+        payload.putBoolean("open", openAtEnd)
+        dispatchEvent("topTransitionStart", payload, coalesces = false)
+    }
+
+    private fun emitTransitionEnd(openChanged: Boolean) {
+        if (!transitionEndEventsEnabled) return
         val payload = Arguments.createMap()
         payload.putBoolean("open", open)
-        dispatchEvent("topOpenChange", payload, coalesces = false)
+        payload.putBoolean("changed", openChanged)
+        dispatchEvent("topTransitionEnd", payload, coalesces = false)
     }
 
     private fun dispatchEvent(eventName: String, payload: WritableMap, coalesces: Boolean) {

@@ -116,7 +116,6 @@ typedef NS_ENUM(NSInteger, RNSideDrawerSettlingSource) {
   RNSideDrawerSettlingSource _settlingSource;
   BOOL _open;
   BOOL _targetOpen;
-  BOOL _lastEmittedOpen;
   BOOL _hasLaidOut;
   BOOL _progressSnapshotPending;
   NSInteger _openingDirection;
@@ -371,7 +370,6 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
     _open = _initialOpen;
     _targetOpen = _open;
     _phase = _open ? RNSideDrawerPhaseOpen : RNSideDrawerPhaseClosed;
-    _lastEmittedOpen = _open;
   }
 
   [self flushPendingProgressSnapshot];
@@ -588,7 +586,6 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
 
   _open = initialOpen;
   _targetOpen = initialOpen;
-  _lastEmittedOpen = initialOpen;
   _phase = initialOpen ? RNSideDrawerPhaseOpen : RNSideDrawerPhaseClosed;
 }
 
@@ -718,17 +715,19 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
 
 - (void)setOpen:(BOOL)open animated:(BOOL)animated source:(RNSideDrawerSettlingSource)source
 {
+  if ((_phase == RNSideDrawerPhaseOpen && open) || (_phase == RNSideDrawerPhaseClosed && !open)) return;
   if (!_hasLaidOut) {
     if (open) [_contentView endEditing:YES];
+    BOOL openChanged = _open != open;
     _initialOpen = open;
     _targetOpen = open;
     _open = open;
     _phase = open ? RNSideDrawerPhaseOpen : RNSideDrawerPhaseClosed;
     [self setNeedsLayout];
-    [self emitOpenChangeIfNeeded];
+    [self emitTransitionStart];
+    [self emitTransitionEndWithOpenChanged:openChanged];
     return;
   }
-  if ((_phase == RNSideDrawerPhaseOpen && open) || (_phase == RNSideDrawerPhaseClosed && !open)) return;
   BOOL cancelActiveDrag = _phase == RNSideDrawerPhaseDragging || _transitionInterruptionPending;
   if (animated && _phase == RNSideDrawerPhaseSettling && _targetOpen == open && !cancelActiveDrag) return;
 
@@ -750,6 +749,7 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
     [self applyPresentationAtProgress:[self revealProgress]];
   }
 
+  [self emitTransitionStart];
   [self publishProgress];
   if (!animated) {
     [self completeTransitionWithDrawerOpen:open];
@@ -923,6 +923,7 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
 
 - (void)completeTransitionWithDrawerOpen:(BOOL)open
 {
+  BOOL openChanged = _open != open;
   _transitionActive = NO;
   _transitionTimeAlignmentPending = NO;
   _transitionInterruptionPending = NO;
@@ -937,7 +938,7 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
   _phase = open ? RNSideDrawerPhaseOpen : RNSideDrawerPhaseClosed;
   [self setRevealProgress:(open ? 1 : 0)];
   [self publishProgress];
-  [self emitOpenChangeIfNeeded];
+  [self emitTransitionEndWithOpenChanged:openChanged];
 }
 
 #pragma mark - Removal
@@ -1133,6 +1134,7 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
   _targetOpen = targetOpen;
   _settlingSource = RNSideDrawerSettlingSourceRelease;
   _phase = RNSideDrawerPhaseSettling;
+  [self emitTransitionStart];
   [self publishProgress];
 }
 
@@ -1144,6 +1146,7 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
   _releaseRevealVelocity = 0;
   _settlingSource = RNSideDrawerSettlingSourceRelease;
   _phase = RNSideDrawerPhaseSettling;
+  [self emitTransitionStart];
   [self publishProgress];
 }
 
@@ -1616,17 +1619,24 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
   if (self.onProgress != nil) self.onProgress(payload);
 }
 
-- (void)emitOpenChangeIfNeeded
+- (void)emitTransitionStart
 {
-  if (_lastEmittedOpen == _open) return;
-  _lastEmittedOpen = _open;
+  if (!_transitionStartEventsEnabled) return;
+  if (self.transitionStartHandler == nil && self.onTransitionStart == nil) return;
 
-  if (!_openChangeEventsEnabled) return;
-  if (self.openChangeHandler == nil && self.onOpenChange == nil) return;
+  NSDictionary *payload = @{ @"open" : @(_targetOpen) };
+  if (self.transitionStartHandler != nil) self.transitionStartHandler(payload);
+  if (self.onTransitionStart != nil) self.onTransitionStart(payload);
+}
 
-  NSDictionary *payload = @{ @"open" : @(_open) };
-  if (self.openChangeHandler != nil) self.openChangeHandler(payload);
-  if (self.onOpenChange != nil) self.onOpenChange(payload);
+- (void)emitTransitionEndWithOpenChanged:(BOOL)openChanged
+{
+  if (!_transitionEndEventsEnabled) return;
+  if (self.transitionEndHandler == nil && self.onTransitionEnd == nil) return;
+
+  NSDictionary *payload = @{ @"open" : @(_open), @"changed" : @(openChanged) };
+  if (self.transitionEndHandler != nil) self.transitionEndHandler(payload);
+  if (self.onTransitionEnd != nil) self.onTransitionEnd(payload);
 }
 
 @end
