@@ -18,8 +18,14 @@ android {
         targetSdkVersion safeExtGet('targetSdkVersion', 35)
     }
 
+    sourceSets {
+        test.java.srcDir '../tests/android/haptics'
+    }
 }
 
 dependencies {
     implementation "com.facebook.react:react-android"
+
+    testImplementation "junit:junit:4.13.2"
+    testImplementation "org.robolectric:robolectric:4.16.1"
 }

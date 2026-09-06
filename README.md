@@ -224,17 +224,7 @@ Drawer transforms are applied to a full-screen native underlay host, so scale an
 
 The motion description is validated and flattened once per `motion` object, then compiled into native line segments when that prop changes. Direct manipulation evaluates those segments synchronously from reveal progress. During an iOS settle, UIKit owns the primary pane animation and a native display observer derives only the configured secondary transforms, opacity, and overlay from the pane's presented reveal. Android evaluates primary and secondary motion together in its native frame callback. Native motion evaluation does not require React renders, JavaScript, Reanimated worklets, or layout passes; attaching `onProgress` separately opts into native event delivery. Overlay color is constant for a motion description; its opacity is interpolated.
 
-`HapticFeedbackType` is `selection`, `light`, `medium`, `heavy`, `soft`, `rigid`, `success`, `warning`, or `error`. These names match the native iOS feedback families. Android maps them to the closest available system feedback and respects the user's system haptic settings. iOS prepares the configured generator on contact and again when a valid drag begins, then triggers it synchronously when release target selection commits a change.
-
-| Type                         | Android feedback                                           |
-| ---------------------------- | ---------------------------------------------------------- |
-| `selection`                  | segment tick on Android 14+, clock tick otherwise          |
-| `soft`                       | frequent segment tick on Android 14+, clock tick otherwise |
-| `light` / `medium` / `heavy` | keyboard tap / virtual key / long press                    |
-| `rigid`                      | context click                                              |
-| `success`                    | confirm on Android 11+, virtual key otherwise              |
-| `warning`                    | context click                                              |
-| `error`                      | reject on Android 11+, long press otherwise                |
+`HapticFeedbackType` is `selection`, `light`, `medium`, `heavy`, `soft`, `rigid`, `success`, `warning`, or `error`. These names match the native iOS feedback families. Android respects system haptic settings and uses composed effects where supported. iOS prepares the configured generator on contact and again when a valid drag begins, then triggers it synchronously when release target selection commits a change.
 
 ## Reanimated observation
 

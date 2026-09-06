@@ -48,6 +48,7 @@
   ],
   "scripts": {
     "typescript": "tsc --noEmit",
+    "test:android-haptics": "cd examples/android && ./gradlew :react-native-interaction-primitives:testDebugUnitTest",
     "test:android-ui": "bash tests/verify-android-ui.sh",
     "test:ios-ui": "bash tests/verify-ios-ui.sh",
     "test:native": "bash tests/verify-native.sh",
