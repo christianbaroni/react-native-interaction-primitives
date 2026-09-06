@@ -163,7 +163,7 @@ Spring criticallyDampedSpring(const Spring &spring) noexcept
   return makeSpring(
       spring.mass,
       spring.stiffness,
-      2 * spring.mass * std::sqrt(spring.naturalFrequencySquared));
+      2 * (spring.mass * std::sqrt(spring.naturalFrequencySquared)));
 }
 
 SpringState evaluateSpring(

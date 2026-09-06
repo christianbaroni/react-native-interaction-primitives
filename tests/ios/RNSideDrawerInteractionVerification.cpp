@@ -166,6 +166,13 @@ void verifySpringRepresentation()
   assert(std::isfinite(quotientConditionedState.displacement));
   assert(std::isfinite(quotientConditionedState.velocity));
 
+  const Spring criticalFallback =
+      rnsidedrawer::criticallyDampedSpring(resolveSpring(1e308, 1, 3e154));
+  requireNear(criticalFallback.mass, 1e308);
+  requireNear(criticalFallback.stiffness, 1);
+  requireNear(criticalFallback.damping, 2e154);
+  assert(criticalFallback.dampingType == DampingType::CriticallyDamped);
+
   const Spring overflow = resolveSpring(1e-300, 1e300, 1);
   requireNear(overflow.mass, 0.8);
   requireNear(overflow.stiffness, 680);
