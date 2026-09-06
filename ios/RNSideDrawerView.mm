@@ -804,7 +804,13 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
 {
   [self restoreTransitionLayerTiming];
   [self prepareViewsForTransition];
-  [self refreshPresentationDisplayLink];
+
+  CGFloat targetPosition = _targetOpen ? _laidOutDrawerWidth : 0;
+  if (isfinite(_transitionVelocity / (targetPosition - _reveal))) {
+    [self scheduleTransitionAnimatorToPosition:targetPosition fromStateAtTime:_transitionStateTime];
+  } else {
+    [self refreshPresentationDisplayLink];
+  }
 }
 
 - (void)scheduleTransitionAnimatorToPosition:(CGFloat)targetPosition
@@ -1530,8 +1536,7 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
     }
   }
 
-  // The interruption case returned above, so an active transition without an
-  // animator is waiting for its first display boundary.
+  // Advance states whose velocity cannot yet be normalized for UIKit.
   if (_transitionAnimator == nil) {
     CGFloat target = _targetOpen ? _laidOutDrawerWidth : 0;
     CFTimeInterval stateTime = displayLink.targetTimestamp;
