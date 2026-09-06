@@ -5,6 +5,7 @@
 @implementation RNSideDrawerContentView {
   NSMutableArray<UIView *> *_reactSubviews;
   UIView *_scrimView;
+  UIView *_overlayView;
 }
 
 - (instancetype)initWithFrame:(CGRect)frame
@@ -17,6 +18,10 @@
     _scrimView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     _scrimView.backgroundColor = UIColor.clearColor;
     _scrimView.userInteractionEnabled = NO;
+    _overlayView = [[UIView alloc] initWithFrame:_scrimView.bounds];
+    _overlayView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    _overlayView.userInteractionEnabled = NO;
+    [_scrimView addSubview:_overlayView];
     [_scrimView addGestureRecognizer:[[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(handleScrimPress)]];
     [super addSubview:_scrimView];
   }
@@ -35,13 +40,13 @@
 
 - (void)setDrawerOverlayColor:(UIColor *)color
 {
-  _scrimView.backgroundColor = color;
+  _overlayView.backgroundColor = color;
 }
 
 - (void)setDrawerOverlayOpacity:(CGFloat)opacity
 {
   CGFloat boundedOpacity = MIN(1, MAX(0, opacity));
-  if (_scrimView.alpha != boundedOpacity) _scrimView.alpha = boundedOpacity;
+  if (_overlayView.alpha != boundedOpacity) _overlayView.alpha = boundedOpacity;
 }
 
 #pragma clang diagnostic push

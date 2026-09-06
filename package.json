@@ -48,6 +48,7 @@
   ],
   "scripts": {
     "typescript": "tsc --noEmit",
+    "test:ios-ui": "bash tests/verify-ios-ui.sh",
     "test:native": "bash tests/verify-native.sh",
     "test:ts": "vitest run --config vitest.config.ts && tsc -p tsconfig.vitest.json --noEmit",
     "lint": "yarn lint:eslint && yarn lint:prettier",
