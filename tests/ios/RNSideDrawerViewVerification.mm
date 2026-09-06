@@ -64,11 +64,70 @@ static void verifyScrim(bool initiallyOpen)
   [drawer prepareForRemoval];
 }
 
+static void verifyRootHitEligibility(RNSideDrawerView *drawer)
+{
+  CGPoint inside = CGPointMake(75, 50);
+  assert([drawer hitTest:inside withEvent:nil] != nil);
+  assert([drawer hitTest:CGPointMake(125, 50) withEvent:nil] == nil);
+  drawer.userInteractionEnabled = NO;
+  assert([drawer hitTest:inside withEvent:nil] == nil);
+  drawer.userInteractionEnabled = YES;
+  drawer.hidden = YES;
+  assert([drawer hitTest:inside withEvent:nil] == nil);
+  drawer.hidden = NO;
+  for (NSNumber *alpha in @[@0, @0.005]) {
+    drawer.alpha = alpha.doubleValue;
+    assert([drawer hitTest:inside withEvent:nil] == nil);
+  }
+  drawer.alpha = 1;
+}
+
+static void verifyAnimatedHitTesting()
+{
+  UIWindow *window = [[UIWindow alloc] initWithFrame:CGRectMake(0, 0, 200, 200)];
+  UIViewController *controller = [[UIViewController alloc] init];
+  window.rootViewController = controller;
+  [window makeKeyAndVisible];
+  RNSideDrawerView *drawer = [[RNSideDrawerView alloc] initWithFrame:CGRectMake(20, 20, 100, 100)];
+  drawer.contentCornerRadius = 0;
+  drawer.drawerWidth = 50;
+  drawer.springMass = 1;
+  drawer.springStiffness = 10;
+  drawer.springDamping = 2;
+  RNSideDrawerContentView *slot = [[RNSideDrawerContentView alloc] initWithFrame:drawer.bounds];
+  UIView *content = [[UIView alloc] initWithFrame:slot.bounds];
+  [slot insertReactSubview:content atIndex:0];
+  [slot didUpdateReactSubviews];
+  [drawer mountSlot:slot atIndex:0];
+  [controller.view addSubview:drawer];
+  [window layoutIfNeeded];
+  verifyRootHitEligibility(drawer);
+
+  [drawer openAnimated:YES];
+  [CATransaction flush];
+  UIView *pane = [drawer valueForKey:@"contentPresentationView"];
+  UIViewPropertyAnimator *animator = nil;
+  CFTimeInterval deadline = CACurrentMediaTime() + 2;
+  do {
+    [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.02]];
+    animator = [drawer valueForKey:@"transitionAnimator"];
+  } while ((animator.fractionComplete <= 0.01 || pane.layer.presentationLayer == nil) && CACurrentMediaTime() < deadline);
+  assert(animator != nil && animator.fractionComplete > 0.01 && animator.fractionComplete < 1);
+  assert(pane.layer.presentationLayer != nil);
+  verifyRootHitEligibility(drawer);
+
+  [drawer closeAnimated:NO];
+  [drawer prepareForRemoval];
+  [drawer removeFromSuperview];
+  window.hidden = YES;
+}
+
 int main()
 {
   @autoreleasepool {
     verifyScrim(false);
     verifyScrim(true);
+    verifyAnimatedHitTesting();
     std::puts("iOS drawer UIKit verification passed");
   }
 }

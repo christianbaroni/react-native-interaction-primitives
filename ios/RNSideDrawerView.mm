@@ -285,6 +285,8 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
       ? (_contentPresentationView.layer.presentationLayer ?: _contentPresentationView.layer)
       : _contentPresentationView.layer;
   if (contentLayer == _contentPresentationView.layer) return [super hitTest:point withEvent:event];
+  if (!self.userInteractionEnabled || self.hidden || self.alpha < 0.01 ||
+      ![self pointInside:point withEvent:event]) return nil;
 
   CGPoint scrollPoint = [_scrollView convertPoint:point fromView:self];
   CALayer *scrollLayer = _scrollView.layer.presentationLayer ?: _scrollView.layer;
