@@ -218,19 +218,11 @@ describe('iOS drawer transition ownership', () => {
     expect(clock).not.toContain('evaluateSpring');
   });
 
-  it('keeps interruption and hit testing aligned with presented motion', () => {
+  it('accepts pans against the target while settling', () => {
     const root = source('RNSideDrawerView.mm');
     const acceptance = between(root, '- (BOOL)canBeginPanWithVelocity:(CGPoint)velocity\n{', '- (void)scrollViewWillBeginDragging:');
-    const hitTest = between(
-      root,
-      '- (nullable UIView *)hitTest:(CGPoint)point withEvent:(nullable UIEvent *)event\n{',
-      '- (void)layoutSubviews'
-    );
 
     expect(acceptance).toContain('return _targetOpen ? revealVelocity < 0 : revealVelocity > 0');
-    expect(hitTest).toContain('_contentPresentationView.layer.presentationLayer');
-    expect(hitTest).toContain('[contentLayer convertPoint:scrollPoint fromLayer:scrollLayer]');
-    expect(hitTest).toContain('[_contentPresentationView hitTest:contentPoint withEvent:event]');
   });
 
   it('remaps settling position and velocity together when drawer width changes', () => {

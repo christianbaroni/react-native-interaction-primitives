@@ -16,6 +16,10 @@
 @implementation RCTSurfaceTouchHandler
 @end
 
+@interface RNSideDrawerView (Verification)
+- (void)handleContactBegin;
+@end
+
 static UIViewPropertyAnimator *waitForAnimation(RNSideDrawerView *drawer)
 {
   UIView *pane = [drawer valueForKey:@"contentPresentationView"];
@@ -62,6 +66,32 @@ static void verifyPendingPanCommand(RNSideDrawerView *drawer, bool frozen, bool 
   [delegate scrollViewWillEndDragging:scroll withVelocity:CGPointZero targetContentOffset:&targetOffset];
   [delegate scrollViewDidEndDragging:scroll willDecelerate:NO];
   assert([[drawer valueForKey:@"targetOpen"] boolValue] == commandOpen);
+  [drawer closeAnimated:NO];
+}
+
+static void verifyContactDuringSettling(RNSideDrawerView *drawer, RNSideDrawerContentView *slot)
+{
+  [drawer openAnimated:NO];
+  [drawer closeAnimated:YES];
+  [CATransaction flush];
+  UIViewPropertyAnimator *animator = waitForAnimation(drawer);
+  UIView *pane = [drawer valueForKey:@"contentPresentationView"];
+  assert([drawer hitTest:CGPointMake(95, 50) withEvent:nil] == slot.subviews.firstObject);
+  CGFloat beforeContact = pane.layer.presentationLayer.position.x;
+  [drawer handleContactBegin];
+  [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.04]];
+  assert([drawer valueForKey:@"transitionAnimator"] == animator);
+  assert(pane.layer.speed == 1);
+  assert(![[drawer valueForKey:@"transitionInterruptionPending"] boolValue]);
+  assert(pane.layer.presentationLayer.position.x < beforeContact);
+
+  [drawer closeAnimated:NO];
+  [drawer openAnimated:YES];
+  [CATransaction flush];
+  waitForAnimation(drawer);
+  assert(slot.onScrimPress != nil);
+  slot.onScrimPress();
+  assert(![[drawer valueForKey:@"targetOpen"] boolValue]);
   [drawer closeAnimated:NO];
 }
 
@@ -156,11 +186,13 @@ static void verifyAnimatedInteractions()
   [CATransaction flush];
   waitForAnimation(drawer);
   verifyRootHitEligibility(drawer);
+  assert([drawer hitTest:CGPointMake(95, 50) withEvent:nil] == slot.subviews.lastObject);
 
   verifyPendingPanCommand(drawer, false, false);
   verifyPendingPanCommand(drawer, false, true);
   verifyPendingPanCommand(drawer, true, false);
   verifyPendingPanCommand(drawer, true, true);
+  verifyContactDuringSettling(drawer, slot);
 
   [drawer closeAnimated:NO];
   [drawer prepareForRemoval];

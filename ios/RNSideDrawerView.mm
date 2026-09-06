@@ -279,31 +279,6 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
   [self stopPresentationDisplayLink];
 }
 
-- (nullable UIView *)hitTest:(CGPoint)point withEvent:(nullable UIEvent *)event
-{
-  CALayer *contentLayer = _transitionActive
-      ? (_contentPresentationView.layer.presentationLayer ?: _contentPresentationView.layer)
-      : _contentPresentationView.layer;
-  if (contentLayer == _contentPresentationView.layer) return [super hitTest:point withEvent:event];
-  if (!self.userInteractionEnabled || self.hidden || self.alpha < 0.01 ||
-      ![self pointInside:point withEvent:event]) return nil;
-
-  CGPoint scrollPoint = [_scrollView convertPoint:point fromView:self];
-  CALayer *scrollLayer = _scrollView.layer.presentationLayer ?: _scrollView.layer;
-  CGPoint contentPoint = [contentLayer convertPoint:scrollPoint fromLayer:scrollLayer];
-  if ([contentLayer containsPoint:contentPoint]) {
-    UIView *contentHit = [_contentPresentationView hitTest:contentPoint withEvent:event];
-    if (contentHit != nil) return contentHit;
-  }
-
-  if (_panelView != nil) {
-    CGPoint panelPoint = [_panelView convertPoint:scrollPoint fromView:_scrollView];
-    UIView *panelHit = [_panelView hitTest:panelPoint withEvent:event];
-    if (panelHit != nil) return panelHit;
-  }
-  return _scrollView;
-}
-
 - (void)layoutSubviews
 {
   [super layoutSubviews];
