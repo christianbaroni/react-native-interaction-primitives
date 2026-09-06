@@ -906,8 +906,7 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
   BOOL layerPaused = layer.speed == 0;
   CGFloat presentedReveal = [self presentedReveal];
   CGFloat velocity = _transitionVelocity;
-  if (!_scrollView.tracking && !_transitionInterruptionPending && _transitionAnimator != nil &&
-      [self alignTransitionStateTimeWithAnimator]) {
+  if (!layerPaused && _transitionAnimator != nil && [self alignTransitionStateTimeWithAnimator]) {
     [self advanceTransitionStateToTime:CACurrentMediaTime()];
     velocity = _transitionVelocity;
   }
@@ -1539,13 +1538,7 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
   // Advance states whose velocity cannot yet be normalized for UIKit.
   if (_transitionAnimator == nil) {
     CGFloat target = _targetOpen ? _laidOutDrawerWidth : 0;
-    CFTimeInterval stateTime = displayLink.targetTimestamp;
-    CFTimeInterval elapsed = MAX(0, stateTime - _transitionStateTime);
-    rnsidedrawer::SpringState state = rnsidedrawer::evaluateSpring(
-        _transitionSpring, _reveal - target, _transitionVelocity, elapsed);
-    _reveal = target + state.displacement;
-    _transitionVelocity = state.velocity;
-    _transitionStateTime = stateTime;
+    [self advanceTransitionStateToTime:displayLink.targetTimestamp];
 
     if (_reveal == target && _transitionVelocity == 0) {
       [self completeTransitionWithDrawerOpen:_targetOpen];
@@ -1557,9 +1550,9 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
     [self applyPresentationAtProgress:[self revealProgress]];
     [CATransaction commit];
 
-    if (_reveal == target) return;
+    if (!isfinite(_transitionVelocity / (target - _reveal))) return;
 
-    [self scheduleTransitionAnimatorToPosition:target fromStateAtTime:stateTime];
+    [self scheduleTransitionAnimatorToPosition:target fromStateAtTime:_transitionStateTime];
     return;
   }
 

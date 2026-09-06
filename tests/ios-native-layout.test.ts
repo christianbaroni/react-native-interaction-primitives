@@ -205,14 +205,13 @@ describe('iOS drawer transition ownership', () => {
     expect(prepared).not.toContain('UIViewPropertyAnimator');
     expect(prepared).not.toContain('startAnimation');
     expect(displayLink).toContain('if (_transitionAnimator == nil)');
-    expect(displayLink).toContain('CFTimeInterval stateTime = displayLink.targetTimestamp');
-    expect(displayLink).toContain('_transitionSpring, _reveal - target, _transitionVelocity, elapsed');
+    expect(displayLink).toContain('[self advanceTransitionStateToTime:displayLink.targetTimestamp]');
     expect(displayLink).toContain('if (_reveal == target && _transitionVelocity == 0)');
-    expect(displayLink).toContain('if (_reveal == target) return;');
+    expect(displayLink).toContain('if (!isfinite(_transitionVelocity / (target - _reveal))) return;');
     expect(displayLink.indexOf('if (_reveal == target && _transitionVelocity == 0)')).toBeLessThan(
-      displayLink.indexOf('[self scheduleTransitionAnimatorToPosition:target fromStateAtTime:stateTime]')
+      displayLink.indexOf('[self scheduleTransitionAnimatorToPosition:target fromStateAtTime:_transitionStateTime]')
     );
-    expect(displayLink).toContain('[self scheduleTransitionAnimatorToPosition:target fromStateAtTime:stateTime]');
+    expect(displayLink).toContain('[self scheduleTransitionAnimatorToPosition:target fromStateAtTime:_transitionStateTime]');
     expect(clock).toContain('_transitionAnimator.fractionComplete * _transitionAnimator.duration');
     expect(clock).toContain('_transitionStateTime = CACurrentMediaTime() - animatorElapsedTime');
     expect(clock).not.toContain('presentedReveal');
