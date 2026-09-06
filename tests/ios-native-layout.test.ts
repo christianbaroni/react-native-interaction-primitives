@@ -67,7 +67,11 @@ describe('iOS native view ownership', () => {
       '- (BOOL)gestureRecognizer:(UIGestureRecognizer *)gestureRecognizer'
     );
     const accepted = between(acceptance, 'if (accepted) {', '}\n\n  _touchedView = nil;');
-    const beginDragging = between(root, '- (void)scrollViewWillBeginDragging:(UIScrollView *)scrollView\n{', '- (void)beginAcceptedDrag');
+    const beginDragging = between(
+      root,
+      '- (void)scrollViewWillBeginDragging:(UIScrollView *)scrollView\n{',
+      '- (void)scrollViewDidScroll:'
+    );
 
     expect(accepted).toContain('cancelReactTouches(findReactTouchHandler(_touchedView != nil ? _touchedView : self))');
     expect(accepted).toContain('cancelTouchedScrollViewPans(_touchedView, self)');
@@ -87,7 +91,7 @@ describe('iOS native view ownership', () => {
       '- (void)setOpen:(BOOL)open animated:(BOOL)animated source:(RNSideDrawerSettlingSource)source\n{',
       '- (void)startTransitionWithTargetOpen:'
     );
-    const drag = between(root, '- (void)scrollViewWillBeginDragging:(UIScrollView *)scrollView\n{', '- (void)beginAcceptedDrag');
+    const drag = between(root, '- (void)scrollViewWillBeginDragging:(UIScrollView *)scrollView\n{', '- (void)scrollViewDidScroll:');
     const sameStateGuard = 'if ((_phase == RNSideDrawerPhaseOpen && open) || (_phase == RNSideDrawerPhaseClosed && !open)) return;';
 
     expect(command).toContain('if (open) [_contentView endEditing:YES]');
@@ -120,24 +124,15 @@ describe('iOS drawer transition ownership', () => {
     expect(root).not.toContain('_transitionClock');
   });
 
-  it('accepts interruptions at pan intent and adopts a stable display-link frame', () => {
+  it('takes drag ownership at pan intent and keeps native settling time-aligned', () => {
     const root = source('RNSideDrawerView.mm');
     const start = between(root, transitionAnimatorImplementation, prepareTransitionImplementation);
     const prepared = between(root, '- (void)startPreparedTransition\n{', '- (void)scheduleTransitionAnimatorToPosition:');
-    const stop = between(root, '- (CGFloat)stopTransitionAtCurrentPosition\n{', '- (void)requestTransitionInterruption');
-    const request = between(root, '- (void)requestTransitionInterruption\n{', '- (void)restoreTransitionLayerTiming');
+    const stop = between(root, '- (CGFloat)stopTransitionAtCurrentPosition\n{', '- (void)handleContactBegin');
     const clock = between(root, '- (BOOL)alignTransitionStateTimeWithAnimator\n{', '- (void)startPresentationDisplayLink');
     const refresh = between(root, '- (void)refreshPresentationDisplayLink\n{', '- (void)handlePresentationDisplayLink:');
-    const restore = between(root, '- (void)restoreTransitionLayerTiming\n{', '- (void)handleContactBegin');
     const contact = between(root, '- (void)handleContactBegin\n{', '- (void)completeTransitionWithDrawerOpen:');
-    const acceptance = between(root, '- (void)scrollViewWillBeginDragging:(UIScrollView *)scrollView\n{', '- (void)beginAcceptedDrag');
-    const scroll = between(root, '- (void)scrollViewDidScroll:(UIScrollView *)scrollView\n{', '- (void)scrollViewWillEndDragging:');
-    const willEnd = between(root, '- (void)scrollViewWillEndDragging:(UIScrollView *)scrollView', '- (void)scrollViewDidEndDragging:');
-    const didEnd = between(
-      root,
-      '- (void)scrollViewDidEndDragging:(UIScrollView *)scrollView willDecelerate:(BOOL)decelerate\n{',
-      '- (void)scrollViewWillBeginDecelerating:'
-    );
+    const acceptance = between(root, '- (void)scrollViewWillBeginDragging:(UIScrollView *)scrollView\n{', '- (void)scrollViewDidScroll:');
     const displayLink = between(root, '- (void)handlePresentationDisplayLink:(CADisplayLink *)displayLink\n{', '#pragma mark - Events');
     const observed = between(displayLink, 'CGFloat reveal = [self presentedReveal];', '[self publishProgressForReveal:reveal];');
     const prepare = between(root, prepareTransitionImplementation, '- (CGFloat)stopTransitionAtCurrentPosition');
@@ -148,46 +143,17 @@ describe('iOS drawer transition ownership', () => {
     expect(start).toContain('CFTimeInterval delay = MAX(0, stateTime - currentTime)');
     expect(start).toContain('[animator startAnimationAfterDelay:delay]');
     expect(root).toContain('CGFloat reveal = _transitionActive ? [self presentedReveal] : _reveal');
-    expect(contact).not.toContain('requestTransitionInterruption');
     expect(contact).not.toContain('stopTransitionAtCurrentPosition');
-    expect(acceptance).toContain('[self requestTransitionInterruption]');
-    expect(acceptance).not.toContain('stopTransitionAtCurrentPosition');
+    expect(acceptance).toContain('if (_transitionActive) [self stopTransitionAtCurrentPosition]');
+    expect(acceptance).toContain('_phase = RNSideDrawerPhaseDragging');
     expect(acceptance).toContain('_activeInteraction = rnsidedrawer::resolveInteraction(_configuredInteraction)');
-    expect(scroll).toContain('[self setScrollOffset:_interruptionScrollOffset]');
-    expect(willEnd).toContain('if (_transitionInterruptionPending)');
-    expect(willEnd).toContain('_deferredPanState = UIGestureRecognizerStateEnded');
-    expect(willEnd).toContain('_deferredPanTranslation = [_scrollView.panGestureRecognizer translationInView:self].x');
-    expect(willEnd).toContain('_deferredPanVelocity = [_scrollView.panGestureRecognizer velocityInView:self].x');
-    expect(didEnd).toContain('if (_transitionInterruptionPending) {');
-    expect(didEnd).toContain('_deferredPanState = UIGestureRecognizerStateCancelled');
     expect(stop).toContain('[_transitionAnimator stopAnimation:YES]');
     expect(stop).toContain('CGFloat presentedReveal = [self presentedReveal]');
     expect(stop).toContain('_reveal = presentedReveal');
     expect(stop).toContain('[self alignTransitionStateTimeWithAnimator]');
     expect(stop.indexOf('[self presentedReveal]')).toBeLessThan(stop.indexOf('stopAnimation:YES'));
-    expect(stop).toContain('if (layerPaused) [self restoreTransitionLayerTiming]');
     expect(stop).toContain('[self applyPresentationAtProgress:[self revealProgress]]');
-    expect(request).toContain('_transitionInterruptionPending = YES');
-    expect(request).toContain('[self startPresentationDisplayLink]');
-    expect(request).not.toContain('pauseAnimation');
-    expect(request).not.toContain('stopTransitionAtCurrentPosition');
-    expect(request).not.toContain('stopAnimation');
-    expect(request).not.toContain('presentedReveal');
-    expect(request).not.toContain('applyPresentationAtProgress');
-    expect(restore).toContain('layer.speed = 1');
-    expect(restore).toContain('layer.timeOffset = 0');
-    expect(restore).toContain('layer.beginTime = 0');
     expect(displayLink).not.toContain('pauseAnimation');
-    expect(displayLink).toContain('[layer convertTime:displayLink.targetTimestamp fromLayer:nil]');
-    expect(displayLink).toContain('layer.speed = 0');
-    expect(displayLink).toContain('layer.timeOffset = pausedTime');
-    expect(displayLink).toContain('if (layer.speed == 0 || _transitionAnimator == nil)');
-    expect(displayLink).toContain('(void)[self stopTransitionAtCurrentPosition]');
-    expect(displayLink).toContain('[self beginAcceptedDrag]');
-    expect(displayLink).toContain('_deferredPanState == UIGestureRecognizerStatePossible');
-    expect(displayLink).toContain('if (state == UIGestureRecognizerStateEnded)');
-    expect(displayLink).toContain('[self commitCurrentDragRelease]');
-    expect(displayLink).toContain('[self startCommittedRelease]');
     expect(displayLink).not.toContain('if (_scrollView.tracking) return;');
     expect(displayLink.match(/applyPresentationAtProgress/g)).toHaveLength(1);
     expect(observed).not.toContain('positionContentForReveal');
@@ -198,7 +164,7 @@ describe('iOS drawer transition ownership', () => {
     expect(observed).toContain('applyMotionAtProgress:RNSideDrawerClamp(motionReveal');
     expect(root).toContain('[screen displayLinkWithTarget:self selector:@selector(handlePresentationDisplayLink:)]');
     expect(root).toContain('CAFrameRateRangeMake(frameRate, frameRate, frameRate)');
-    expect(refresh).toContain('_transitionAnimator == nil || _transitionInterruptionPending');
+    expect(refresh).toContain('_transitionAnimator == nil || _progressEventsEnabled || _motion.hasInterpolations()');
     expect(refresh).not.toContain('_transitionTimeAlignmentPending');
     expect(prepare).toContain('reveal == targetPosition && resolvedVelocity == 0');
     expect(prepared).toContain('[self refreshPresentationDisplayLink]');

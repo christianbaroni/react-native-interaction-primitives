@@ -3,10 +3,12 @@
 #import <React/RCTSurfaceTouchHandler.h>
 #import <React/RCTTouchHandler.h>
 #import <React/UIView+React.h>
+#import <objc/runtime.h>
 
 #include <cassert>
 #include <cmath>
 #include <cstdio>
+#include <initializer_list>
 
 // These tests exercise UIKit and native drawer callbacks, not React touch dispatch.
 @implementation RCTTouchHandler
@@ -18,19 +20,63 @@
 
 @interface RNSideDrawerView (Verification)
 - (void)handleContactBegin;
+- (BOOL)canBeginPanWithVelocity:(CGPoint)velocity;
+- (void)handlePanGesture:(UIPanGestureRecognizer *)pan;
 @end
 
-@interface CallbackVerificationDrawer : RNSideDrawerView
-@property (nonatomic, assign) CGFloat panTranslation;
+@interface VerificationPanInput : NSObject
+@property (nonatomic, assign) CGFloat translation;
+@property (nonatomic, assign) CGFloat velocity;
+@property (nonatomic, assign) UIGestureRecognizerState state;
 @end
 
-@implementation CallbackVerificationDrawer
-// Control gesture input while exercising the native callbacks and actual animator.
-- (CGFloat)dragTranslation
+@implementation VerificationPanInput
+@end
+
+static char panInputKey;
+
+static VerificationPanInput *panInput(UIPanGestureRecognizer *pan)
 {
-  return self.panTranslation;
+  return objc_getAssociatedObject(pan, &panInputKey);
 }
-@end
+
+static CGPoint panTranslation(UIPanGestureRecognizer *pan, SEL, UIView *)
+{
+  return CGPointMake(panInput(pan).translation, 0);
+}
+
+static CGPoint panVelocity(UIPanGestureRecognizer *pan, SEL, UIView *)
+{
+  return CGPointMake(panInput(pan).velocity, 0);
+}
+
+static UIGestureRecognizerState panState(UIPanGestureRecognizer *pan, SEL)
+{
+  return panInput(pan).state;
+}
+
+static VerificationPanInput *controlPan(RNSideDrawerView *drawer)
+{
+  // Supply gesture samples at the delegate boundary while retaining UIKit's scroll view and animator.
+  UIScrollView *scroll = [drawer valueForKey:@"scrollView"];
+  UIPanGestureRecognizer *pan = scroll.panGestureRecognizer;
+  Class parent = object_getClass(pan);
+  Class subclass = objc_lookUpClass("RNIPVerificationPan");
+  if (subclass == Nil) {
+    subclass = objc_allocateClassPair(parent, "RNIPVerificationPan", 0);
+    class_addMethod(subclass, @selector(translationInView:), (IMP)panTranslation,
+        method_getTypeEncoding(class_getInstanceMethod(parent, @selector(translationInView:))));
+    class_addMethod(subclass, @selector(velocityInView:), (IMP)panVelocity,
+        method_getTypeEncoding(class_getInstanceMethod(parent, @selector(velocityInView:))));
+    class_addMethod(subclass, @selector(state), (IMP)panState,
+        method_getTypeEncoding(class_getInstanceMethod(parent, @selector(state))));
+    objc_registerClassPair(subclass);
+  }
+  VerificationPanInput *input = [VerificationPanInput new];
+  objc_setAssociatedObject(pan, &panInputKey, input, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+  object_setClass(pan, subclass);
+  return input;
+}
 
 static UIViewPropertyAnimator *waitForAnimation(RNSideDrawerView *drawer)
 {
@@ -46,7 +92,7 @@ static UIViewPropertyAnimator *waitForAnimation(RNSideDrawerView *drawer)
   return animator;
 }
 
-static void verifyPendingPanCommand(RNSideDrawerView *drawer, bool frozen, bool commandOpen)
+static void verifyPanCommand(RNSideDrawerView *drawer, bool commandOpen)
 {
   [drawer closeAnimated:NO];
   [drawer openAnimated:YES];
@@ -55,25 +101,13 @@ static void verifyPendingPanCommand(RNSideDrawerView *drawer, bool frozen, bool 
 
   UIScrollView *scroll = [drawer valueForKey:@"scrollView"];
   id<UIScrollViewDelegate> delegate = (id<UIScrollViewDelegate>)drawer;
-  // Enter the accepted-pan boundary directly; the animator and display link are real.
   [delegate scrollViewWillBeginDragging:scroll];
-  assert([[drawer valueForKey:@"transitionInterruptionPending"] boolValue]);
-  UIView *pane = [drawer valueForKey:@"contentPresentationView"];
-  if (frozen) {
-    CFTimeInterval deadline = CACurrentMediaTime() + 2;
-    do {
-      [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.001]];
-    } while (pane.layer.speed != 0 && CACurrentMediaTime() < deadline);
-    assert(pane.layer.speed == 0);
-  }
+  assert([drawer valueForKey:@"transitionAnimator"] == nil);
 
   if (commandOpen) [drawer openAnimated:YES];
   else [drawer closeAnimated:YES];
-  assert(![[drawer valueForKey:@"transitionInterruptionPending"] boolValue]);
   assert([[drawer valueForKey:@"suppressCurrentDragRelease"] boolValue]);
-  assert(pane.layer.speed == 1);
 
-  [scroll.panGestureRecognizer setTranslation:CGPointMake(commandOpen ? -200 : 200, 0) inView:drawer];
   CGPoint targetOffset = scroll.contentOffset;
   [delegate scrollViewWillEndDragging:scroll withVelocity:CGPointZero targetContentOffset:&targetOffset];
   [delegate scrollViewDidEndDragging:scroll willDecelerate:NO];
@@ -94,7 +128,6 @@ static void verifyContactDuringSettling(RNSideDrawerView *drawer, RNSideDrawerCo
   [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.04]];
   assert([drawer valueForKey:@"transitionAnimator"] == animator);
   assert(pane.layer.speed == 1);
-  assert(![[drawer valueForKey:@"transitionInterruptionPending"] boolValue]);
   assert(pane.layer.presentationLayer.position.x < beforeContact);
 
   [drawer closeAnimated:NO];
@@ -200,10 +233,8 @@ static void verifyAnimatedInteractions()
   verifyRootHitEligibility(drawer);
   assert([drawer hitTest:CGPointMake(95, 50) withEvent:nil] == slot.subviews.lastObject);
 
-  verifyPendingPanCommand(drawer, false, false);
-  verifyPendingPanCommand(drawer, false, true);
-  verifyPendingPanCommand(drawer, true, false);
-  verifyPendingPanCommand(drawer, true, true);
+  verifyPanCommand(drawer, false);
+  verifyPanCommand(drawer, true);
   verifyContactDuringSettling(drawer, slot);
 
   [drawer closeAnimated:NO];
@@ -222,18 +253,106 @@ static void waitForSettle(RNSideDrawerView *drawer)
   assert(![[drawer valueForKey:@"transitionActive"] boolValue]);
 }
 
-static void endPan(CallbackVerificationDrawer *drawer, CGFloat translation, bool cancelled)
+static void endPan(RNSideDrawerView *drawer, CGFloat translation, bool cancelled)
 {
   UIScrollView *scroll = [drawer valueForKey:@"scrollView"];
   id<UIScrollViewDelegate> delegate = (id<UIScrollViewDelegate>)drawer;
-  drawer.panTranslation = 0;
+  VerificationPanInput *input = panInput(scroll.panGestureRecognizer);
+  input.translation = 0;
+  input.state = UIGestureRecognizerStateBegan;
   [delegate scrollViewWillBeginDragging:scroll];
-  drawer.panTranslation = translation;
+  input.translation = translation;
+  input.state = cancelled ? UIGestureRecognizerStateCancelled : UIGestureRecognizerStateEnded;
   if (!cancelled) {
     CGPoint targetOffset = scroll.contentOffset;
     [delegate scrollViewWillEndDragging:scroll withVelocity:CGPointZero targetContentOffset:&targetOffset];
   }
   [delegate scrollViewDidEndDragging:scroll willDecelerate:NO];
+}
+
+static void verifyPanInterruption(bool opening, bool endSide, bool observed)
+{
+  UIWindow *window = [[UIWindow alloc] initWithFrame:CGRectMake(0, 0, 400, 800)];
+  window.rootViewController = [UIViewController new];
+  [window makeKeyAndVisible];
+  RNSideDrawerView *drawer = [[RNSideDrawerView alloc] initWithFrame:window.bounds];
+  drawer.drawerWidth = 320;
+  drawer.side = endSide ? RNSideDrawerSideEnd : RNSideDrawerSideStart;
+  drawer.initialOpen = !opening;
+  drawer.springMass = 0.8;
+  drawer.springStiffness = 680;
+  drawer.springDamping = 46;
+  drawer.progressEventsEnabled = observed;
+  [window.rootViewController.view addSubview:drawer];
+  [window layoutIfNeeded];
+  VerificationPanInput *input = controlPan(drawer);
+  UIScrollView *scroll = [drawer valueForKey:@"scrollView"];
+  id<UIScrollViewDelegate> delegate = (id<UIScrollViewDelegate>)drawer;
+  CGFloat direction = endSide ? -1 : 1;
+  CGFloat travelDirection = (opening ? 1 : -1) * direction;
+
+  // Settle from a preceding drag, so the reversing gesture changes an interior scroll offset.
+  input.state = UIGestureRecognizerStateBegan;
+  [delegate scrollViewWillBeginDragging:scroll];
+  input.translation = travelDirection * 160;
+  input.velocity = travelDirection * 700;
+  input.state = UIGestureRecognizerStateChanged;
+  scroll.contentOffset = CGPointMake(160, 0);
+  [drawer handlePanGesture:scroll.panGestureRecognizer];
+  input.state = UIGestureRecognizerStateEnded;
+  CGPoint targetOffset = scroll.contentOffset;
+  [delegate scrollViewWillEndDragging:scroll withVelocity:CGPointZero targetContentOffset:&targetOffset];
+  [delegate scrollViewDidEndDragging:scroll willDecelerate:NO];
+  [CATransaction flush];
+
+  UIView *pane = [drawer valueForKey:@"contentPresentationView"];
+  CGFloat target = opening ? 320 : 0;
+  CGFloat before = opening ? 0 : 320;
+  CFTimeInterval deadline = CACurrentMediaTime() + 2;
+  do {
+    [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.001]];
+    CALayer *presentation = pane.layer.presentationLayer ?: pane.layer;
+    before = (presentation.position.x - scroll.contentOffset.x - drawer.bounds.size.width / 2) * direction;
+  } while (std::abs(target - before) > (observed ? 16 : 32) && CACurrentMediaTime() < deadline);
+  assert(CACurrentMediaTime() < deadline);
+  assert([drawer valueForKey:@"transitionAnimator"] != nil);
+
+  input.translation = -travelDirection * 8;
+  input.velocity = -travelDirection * 700;
+  input.state = UIGestureRecognizerStateBegan;
+  assert([drawer canBeginPanWithVelocity:CGPointMake(input.velocity, 0)]);
+  [delegate scrollViewWillBeginDragging:scroll];
+  assert([drawer valueForKey:@"transitionAnimator"] == nil);
+  assert(![[drawer valueForKey:@"transitionActive"] boolValue]);
+  assert(std::abs([[drawer valueForKey:@"reveal"] doubleValue] - before) < 0.001);
+
+  for (int step = 1; step <= 2; step++) {
+    input.translation -= travelDirection * 8;
+    input.state = UIGestureRecognizerStateChanged;
+    scroll.contentOffset = CGPointMake(scroll.contentOffset.x + travelDirection * 8, 0);
+    [drawer handlePanGesture:scroll.panGestureRecognizer];
+    CGFloat expected = before + (opening ? -1 : 1) * step * 8;
+    assert(std::abs([[drawer valueForKey:@"reveal"] doubleValue] - expected) < 0.001);
+    CGFloat model = (pane.layer.position.x - scroll.contentOffset.x - drawer.bounds.size.width / 2) * direction;
+    assert(std::abs(model - expected) < 0.001);
+  }
+
+  CGFloat beforeLayout = [[drawer valueForKey:@"reveal"] doubleValue];
+  drawer.side = endSide ? RNSideDrawerSideStart : RNSideDrawerSideEnd;
+  drawer.drawerWidth = 400;
+  [drawer layoutIfNeeded];
+  [drawer handlePanGesture:scroll.panGestureRecognizer];
+  assert(std::abs([[drawer valueForKey:@"reveal"] doubleValue] - beforeLayout * 1.25) < 0.001);
+  input.velocity = travelDirection * 700;
+  input.state = UIGestureRecognizerStateEnded;
+  targetOffset = scroll.contentOffset;
+  [delegate scrollViewWillEndDragging:scroll withVelocity:CGPointZero targetContentOffset:&targetOffset];
+  [delegate scrollViewDidEndDragging:scroll willDecelerate:NO];
+  assert([[drawer valueForKey:@"targetOpen"] boolValue] == !opening);
+  waitForSettle(drawer);
+  [drawer prepareForRemoval];
+  [drawer removeFromSuperview];
+  window.hidden = YES;
 }
 
 static void verifyTransitionCallbacks(bool paper)
@@ -242,7 +361,8 @@ static void verifyTransitionCallbacks(bool paper)
   UIViewController *controller = [[UIViewController alloc] init];
   window.rootViewController = controller;
   [window makeKeyAndVisible];
-  CallbackVerificationDrawer *drawer = [[CallbackVerificationDrawer alloc] initWithFrame:window.bounds];
+  RNSideDrawerView *drawer = [[RNSideDrawerView alloc] initWithFrame:window.bounds];
+  controlPan(drawer);
   drawer.drawerWidth = 120;
   drawer.initialOpen = YES;
   NSMutableArray<NSString *> *events = [NSMutableArray array];
@@ -345,6 +465,11 @@ int main()
     verifyScrim(false);
     verifyScrim(true);
     verifyAnimatedInteractions();
+    for (bool opening : {false, true}) {
+      for (bool endSide : {false, true}) {
+        for (bool observed : {false, true}) verifyPanInterruption(opening, endSide, observed);
+      }
+    }
     verifyTransitionCallbacks(false);
     verifyTransitionCallbacks(true);
     std::puts("iOS drawer UIKit verification passed");
