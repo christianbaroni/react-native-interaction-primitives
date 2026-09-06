@@ -88,7 +88,7 @@
   "peerDependencies": {
     "react": ">=18.2.0",
     "react-native": ">=0.81.0",
-    "react-native-reanimated": ">=4.0.0"
+    "react-native-reanimated": ">=3.19.5"
   },
   "peerDependenciesMeta": {
     "react-native-reanimated": {
