@@ -30,14 +30,7 @@ export function PagerExample({ navigation }: { navigation: React.ReactNode }): R
         <Text style={styles.detail}>Drag, fling, then grab the page again while it is still moving.</Text>
       </View>
 
-      <Pager
-        initialPage={1}
-        onPageChange={event => setPage(event.page)}
-        pageInset={20}
-        pageSpacing={12}
-        ref={pagerRef}
-        style={styles.pager}
-      >
+      <Pager initialPage={1} onPageChange={event => setPage(event.page)} pageSpacing={12} ref={pagerRef} style={styles.pager}>
         {PAGES.map((item, index) => (
           <View key={item.title} style={[styles.page, { backgroundColor: item.color }]}>
             <Text style={styles.pageNumber}>0{index + 1}</Text>
@@ -179,6 +172,7 @@ const styles = StyleSheet.create({
   },
   pager: {
     flex: 1,
+    marginHorizontal: 20,
     marginVertical: 28,
   },
   position: {
