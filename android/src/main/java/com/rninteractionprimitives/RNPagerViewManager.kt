@@ -25,11 +25,6 @@ internal class RNPagerViewManager :
 
     override fun needsCustomLayoutForChildren(): Boolean = true
 
-    override fun onAfterUpdateTransaction(view: RNPagerView) {
-        super.onAfterUpdateTransaction(view)
-        view.flushPendingPageScrollSnapshot()
-    }
-
     override fun addView(parent: RNPagerView, child: View, index: Int) {
         if (child is RNPagerPageView) parent.addPagerPage(child, index)
     }
@@ -96,6 +91,10 @@ internal class RNPagerViewManager :
     @ReactProp(name = "stateEventsEnabled", defaultBoolean = false)
     override fun setStateEventsEnabled(view: RNPagerView, value: Boolean) {
         view.stateEventsEnabled = value
+    }
+
+    override fun requestPageScrollSnapshot(view: RNPagerView) {
+        view.requestPageScrollSnapshot()
     }
 
     override fun setPage(view: RNPagerView, page: Int, animated: Boolean) {

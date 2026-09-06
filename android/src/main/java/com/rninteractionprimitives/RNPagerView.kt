@@ -58,7 +58,6 @@ internal class RNPagerView(private val reactContext: ThemedReactContext) : ViewG
     private var lastEmittedPage = Int.MIN_VALUE
     private var lastMainAxisPx = 0f
     private var laidOutPageExtentPx = 0f
-    private var pageScrollSnapshotPending = false
     private var pausedSettleVelocityPxPerSecond = 0f
     private var phase = Phase.Empty
     private var selectedPage = 0
@@ -106,11 +105,6 @@ internal class RNPagerView(private val reactContext: ThemedReactContext) : ViewG
     var pageChangeEventsEnabled: Boolean = false
 
     var pageScrollEventsEnabled: Boolean = false
-        set(value) {
-            if (field == value) return
-            field = value
-            pageScrollSnapshotPending = value
-        }
 
     var pageSpacingPx: Float = 0f
         set(value) {
@@ -153,6 +147,21 @@ internal class RNPagerView(private val reactContext: ThemedReactContext) : ViewG
         }
         cancelTouchInteraction()
         super.onDetachedFromWindow()
+    }
+
+    override fun requestLayout() {
+        val layoutWasRequested = isLayoutRequested
+        super.requestLayout()
+        if (layoutWasRequested) return
+        // React Native parents do not propagate native child layout requests.
+        post {
+            if (!isLayoutRequested) return@post
+            measure(
+                MeasureSpec.makeMeasureSpec(width, MeasureSpec.EXACTLY),
+                MeasureSpec.makeMeasureSpec(height, MeasureSpec.EXACTLY),
+            )
+            layout(left, top, right, bottom)
+        }
     }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
@@ -218,7 +227,7 @@ internal class RNPagerView(private val reactContext: ThemedReactContext) : ViewG
             page.layout(pageLeft, pageTop, pageLeft + page.measuredWidth, pageTop + page.measuredHeight)
         }
 
-        val nextPosition = if (previousPageExtent > 0f && phase != Phase.Empty) {
+        val nextPosition = if (previousPageExtent > 0f && hasLaidOutPages) {
             previousPosition
         } else {
             selectedPage.toFloat()
@@ -239,10 +248,7 @@ internal class RNPagerView(private val reactContext: ThemedReactContext) : ViewG
             }
         }
         publishState()
-        if (pageScrollEventsEnabled && hasLaidOutPages) {
-            pageScrollSnapshotPending = false
-            publishPageScroll()
-        }
+        publishPageScroll()
     }
 
     override fun onInitializeAccessibilityEvent(event: AccessibilityEvent) {
@@ -444,9 +450,11 @@ internal class RNPagerView(private val reactContext: ThemedReactContext) : ViewG
         selectedPage = clampPage(selectedPage)
         if (pages.isEmpty()) {
             hasLaidOutPages = false
+            transitionToPhase(Phase.Empty)
+            cancelTouchInteraction()
             scroller.abortAnimation()
             clearPausedSettle()
-            transitionToPhase(Phase.Empty)
+            scrollToOffsetPx(0f)
         }
         updatePageAccessibility()
         requestLayout()
@@ -460,10 +468,11 @@ internal class RNPagerView(private val reactContext: ThemedReactContext) : ViewG
         settleToPage(page, SettlingSource.Programmatic, animated)
     }
 
-    fun flushPendingPageScrollSnapshot() {
-        if (!pageScrollSnapshotPending || !pageScrollEventsEnabled || !hasLaidOutPages) return
-        pageScrollSnapshotPending = false
-        publishPageScroll()
+    fun requestPageScrollSnapshot() {
+        // RN commands can bypass UI queue work, including Reanimated registration.
+        post {
+            if (hasLaidOutPages || pages.isEmpty()) publishPageScroll()
+        }
     }
 
     fun prepareForRemoval() {
@@ -605,6 +614,7 @@ internal class RNPagerView(private val reactContext: ThemedReactContext) : ViewG
         updatePageAccessibility()
         transitionToPhase(if (pages.isEmpty()) Phase.Empty else Phase.Idle)
         publishState()
+        publishPageScroll()
         if (selectionChanged) sendAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_SCROLLED)
         if (lastEmittedPage != selectedPage) {
             lastEmittedPage = selectedPage

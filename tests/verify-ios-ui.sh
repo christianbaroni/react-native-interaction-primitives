@@ -14,7 +14,12 @@ xcrun --sdk iphonesimulator clang++ \
   -isysroot "$SDK_PATH" \
   -std=c++20 -fobjc-arc -Wall -Wextra -Werror \
   -I"$REPO_ROOT/tests/ios/react-stubs" -I"$SOURCE_DIR" \
+  "$REPO_ROOT/tests/ios/UIKitVerification.mm" \
   "$REPO_ROOT/tests/ios/RNSideDrawerViewVerification.mm" \
+  "$REPO_ROOT/tests/ios/RNPagerViewVerification.mm" \
+  "$SOURCE_DIR/RNPagerView.mm" \
+  "$SOURCE_DIR/RNPagerPageView.mm" \
+  "$SOURCE_DIR/RNPagerScrollView.mm" \
   "$SOURCE_DIR/RNSideDrawerView.mm" \
   "$SOURCE_DIR/RNSideDrawerContentView.mm" \
   "$SOURCE_DIR/RNSideDrawerPanelView.mm" \
@@ -23,6 +28,6 @@ xcrun --sdk iphonesimulator clang++ \
   "$SOURCE_DIR/RNSideDrawerMotion.mm" \
   "$SOURCE_DIR/RNInteractionHapticFeedback.mm" \
   -framework UIKit -framework Foundation -framework QuartzCore -framework CoreGraphics \
-  -o "$BUILD_DIR/side-drawer-ui-verification"
+  -o "$BUILD_DIR/interaction-ui-verification"
 
-xcrun simctl spawn "$SIMULATOR" "$BUILD_DIR/side-drawer-ui-verification"
+xcrun simctl spawn "$SIMULATOR" "$BUILD_DIR/interaction-ui-verification"

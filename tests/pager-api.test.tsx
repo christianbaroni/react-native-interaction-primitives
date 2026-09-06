@@ -95,6 +95,59 @@ describe('Pager API', () => {
     expect(lastNativeProps('RNPagerView').pageChangeEventsEnabled).toBe(true);
   });
 
+  it('requests the attachment snapshot after enclosing mount lifecycles', async () => {
+    class AnimatedParent extends React.Component<React.PropsWithChildren> {
+      componentDidMount() {
+        expect(__getNativeCommandCalls()).toHaveLength(0);
+      }
+
+      render() {
+        return this.props.children;
+      }
+    }
+
+    render(
+      <AnimatedParent>
+        <Pager onPageScroll={vi.fn()}>
+          <span>page</span>
+        </Pager>
+      </AnimatedParent>
+    );
+    await act(async () => {});
+    expect(__getNativeCommandCalls().map(call => call.name)).toEqual(['requestPageScrollSnapshot']);
+  });
+
+  it('requests a snapshot on attachment and skips unchanged observation', async () => {
+    const onPageScroll = vi.fn();
+    const { rerender } = render(<Pager>{null}</Pager>);
+    await act(async () => {});
+    expect(__getNativeCommandCalls()).toHaveLength(0);
+
+    rerender(<Pager onPageScroll={onPageScroll}>{null}</Pager>);
+    await act(async () => {});
+    expect(__getNativeCommandCalls().map(call => call.name)).toEqual(['requestPageScrollSnapshot']);
+
+    rerender(
+      <Pager initialPage={1} onPageScroll={onPageScroll}>
+        {null}
+      </Pager>
+    );
+    await act(async () => {});
+    expect(__getNativeCommandCalls()).toHaveLength(1);
+  });
+
+  it('drops queued snapshot requests when observation ends or the pager unmounts', async () => {
+    const { rerender, unmount } = render(<Pager onPageScroll={vi.fn()}>{null}</Pager>);
+    rerender(<Pager>{null}</Pager>);
+    await act(async () => {});
+    expect(__getNativeCommandCalls()).toHaveLength(0);
+
+    rerender(<Pager onPageScroll={vi.fn()}>{null}</Pager>);
+    unmount();
+    await act(async () => {});
+    expect(__getNativeCommandCalls()).toHaveLength(0);
+  });
+
   it('rehydrates state events and narrows page-change events at the public boundary', () => {
     const onPageChange = vi.fn();
     const onStateChange = vi.fn();

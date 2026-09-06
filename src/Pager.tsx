@@ -13,6 +13,10 @@ type PagerInternalProps = PagerProps & {
   topPageScroll?: PagerProps['onPageScroll'];
 };
 
+function hasPageScrollListener({ onPageScroll, topPageScroll }: PagerInternalProps): boolean {
+  return onPageScroll != null || topPageScroll != null;
+}
+
 function pagerPagesFromChildren(children: React.ReactNode): React.ReactNode[] {
   const pages: React.ReactNode[] = [];
   React.Children.forEach(children, child => {
@@ -47,11 +51,16 @@ class PagerImplementation extends React.PureComponent<PagerProps> implements Pag
 
   componentDidMount() {
     this.pageCount = pagerPageCountFromChildren(this.props.children);
+    // The enclosing Animated component registers its events later in this commit.
+    if (hasPageScrollListener(this.props)) queueMicrotask(this.requestPageScrollSnapshot);
   }
 
   componentDidUpdate(previousProps: PagerProps) {
     if (previousProps.children !== this.props.children) {
       this.pageCount = pagerPageCountFromChildren(this.props.children);
+    }
+    if (!hasPageScrollListener(previousProps) && hasPageScrollListener(this.props)) {
+      queueMicrotask(this.requestPageScrollSnapshot);
     }
   }
 
@@ -66,6 +75,12 @@ class PagerImplementation extends React.PureComponent<PagerProps> implements Pag
     }
     Commands.setPage(this.nativeRef, page, options?.animated ?? true);
   }
+
+  private requestPageScrollSnapshot = () => {
+    if (this.nativeRef != null && hasPageScrollListener(this.props)) {
+      Commands.requestPageScrollSnapshot(this.nativeRef);
+    }
+  };
 
   private setNativeRef = (ref: NativePagerRef) => {
     this.nativeRef = ref;
@@ -96,7 +111,7 @@ class PagerImplementation extends React.PureComponent<PagerProps> implements Pag
         onPageScroll={onPageScroll}
         onStateChange={onStateChange ? this.handleStateChange : undefined}
         pageChangeEventsEnabled={onPageChange != null}
-        pageScrollEventsEnabled={onPageScroll != null || topPageScroll != null}
+        pageScrollEventsEnabled={hasPageScrollListener(internalProps)}
         ref={this.setNativeRef}
         scrollEnabled={scrollEnabled}
         stateEventsEnabled={onStateChange != null}

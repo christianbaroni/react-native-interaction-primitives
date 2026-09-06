@@ -7,7 +7,6 @@
 
 #include <cassert>
 #include <cmath>
-#include <cstdio>
 #include <initializer_list>
 
 // These tests exercise UIKit and native drawer callbacks, not React touch dispatch.
@@ -459,19 +458,16 @@ static void verifyTransitionCallbacks(bool paper)
   window.hidden = YES;
 }
 
-int main()
+void verifySideDrawer()
 {
-  @autoreleasepool {
-    verifyScrim(false);
-    verifyScrim(true);
-    verifyAnimatedInteractions();
-    for (bool opening : {false, true}) {
-      for (bool endSide : {false, true}) {
-        for (bool observed : {false, true}) verifyPanInterruption(opening, endSide, observed);
-      }
+  verifyScrim(false);
+  verifyScrim(true);
+  verifyAnimatedInteractions();
+  for (bool opening : {false, true}) {
+    for (bool endSide : {false, true}) {
+      for (bool observed : {false, true}) verifyPanInterruption(opening, endSide, observed);
     }
-    verifyTransitionCallbacks(false);
-    verifyTransitionCallbacks(true);
-    std::puts("iOS drawer UIKit verification passed");
   }
+  verifyTransitionCallbacks(false);
+  verifyTransitionCallbacks(true);
 }

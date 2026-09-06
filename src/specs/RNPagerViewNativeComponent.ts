@@ -34,11 +34,12 @@ export interface NativeProps extends ViewProps {
 }
 
 interface NativeCommands {
+  requestPageScrollSnapshot(viewRef: React.ElementRef<HostComponent<NativeProps>>): void;
   setPage(viewRef: React.ElementRef<HostComponent<NativeProps>>, page: Int32, animated: boolean): void;
 }
 
 export const Commands: NativeCommands = codegenNativeCommands<NativeCommands>({
-  supportedCommands: ['setPage'],
+  supportedCommands: ['setPage', 'requestPageScrollSnapshot'],
 });
 
 export default codegenNativeComponent<NativeProps>('RNPagerView');

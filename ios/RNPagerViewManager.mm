@@ -168,12 +168,6 @@ static Event RNPagerStateEvent(NSDictionary *payload)
   _pagerView.frame = self.bounds;
 }
 
-- (void)finalizeUpdates:(RNComponentViewUpdateMask)updateMask
-{
-  [super finalizeUpdates:updateMask];
-  [_pagerView flushPendingPageScrollSnapshot];
-}
-
 - (void)updateProps:(const Props::Shared &)props oldProps:(const Props::Shared &)oldProps
 {
   const auto &oldViewProps = static_cast<const RNPagerViewProps &>(*_props);
@@ -230,6 +224,11 @@ static Event RNPagerStateEvent(NSDictionary *payload)
 - (void)setPage:(NSInteger)page animated:(BOOL)animated
 {
   [_pagerView setPage:page animated:animated];
+}
+
+- (void)requestPageScrollSnapshot
+{
+  [_pagerView requestPageScrollSnapshot];
 }
 
 - (void)prepareForRecycle
@@ -295,6 +294,16 @@ RCT_CUSTOM_VIEW_PROPERTY(orientation, NSString, RNPagerView)
 {
   NSString *orientation = [RCTConvert NSString:json] ?: @"horizontal";
   view.orientation = [orientation isEqualToString:@"vertical"] ? RNPagerOrientationVertical : RNPagerOrientationHorizontal;
+}
+
+RCT_EXPORT_METHOD(requestPageScrollSnapshot:(nonnull NSNumber *)reactTag)
+{
+  [self.bridge.uiManager addUIBlock:^(__unused RCTUIManager *uiManager, NSDictionary<NSNumber *, UIView *> *viewRegistry) {
+    UIView *view = viewRegistry[reactTag];
+    if ([view isKindOfClass:RNPagerView.class]) {
+      [(RNPagerView *)view requestPageScrollSnapshot];
+    }
+  }];
 }
 
 RCT_EXPORT_METHOD(setPage:(nonnull NSNumber *)reactTag page:(NSInteger)page animated:(BOOL)animated)
