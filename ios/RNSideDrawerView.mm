@@ -369,7 +369,7 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
     _reveal = rnsidedrawer::resistedPosition(
         _unconstrainedDragPosition, _dragLowerBound, _dragUpperBound, _activeInteraction.overdrag);
     _dragStartPosition = _unconstrainedDragPosition;
-    _dragStartTranslation = [_scrollView.panGestureRecognizer translationInView:self].x * _openingDirection;
+    _dragStartTranslation = [_scrollView.panGestureRecognizer translationInView:self].x;
   }
 
   [self setScrollOffset:[self scrollOffsetForProgress:[self revealProgress]]];
@@ -754,17 +754,17 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
     return;
   }
   if ((_phase == RNSideDrawerPhaseOpen && open) || (_phase == RNSideDrawerPhaseClosed && !open)) return;
-  if (animated && _phase == RNSideDrawerPhaseSettling && _targetOpen == open) return;
+  BOOL cancelActiveDrag = _phase == RNSideDrawerPhaseDragging || _transitionInterruptionPending;
+  if (animated && _phase == RNSideDrawerPhaseSettling && _targetOpen == open && !cancelActiveDrag) return;
 
   if (open) [_contentView endEditing:YES];
   CGFloat revealVelocity = _phase == RNSideDrawerPhaseSettling ? [self stopTransitionAtCurrentPosition] : 0;
-  BOOL cancelActiveDrag = _phase == RNSideDrawerPhaseDragging;
 
-  if (cancelActiveDrag) {
+  if (_phase == RNSideDrawerPhaseDragging) {
     [self updateDragFromPanGesture];
     [self applyPresentationAtProgress:[self revealProgress]];
-    _suppressCurrentDragRelease = YES;
   }
+  if (cancelActiveDrag) _suppressCurrentDragRelease = YES;
 
   _targetOpen = open;
   _settlingSource = source;
@@ -1011,7 +1011,7 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
   _gestureOriginOpen = interruptedTargetOpen;
   _gestureHapticTriggered = NO;
   _activeInteraction = rnsidedrawer::resolveInteraction(_configuredInteraction);
-  _dragStartTranslation = [_scrollView.panGestureRecognizer translationInView:self].x * _openingDirection;
+  _dragStartTranslation = [_scrollView.panGestureRecognizer translationInView:self].x;
   _deferredPanState = UIGestureRecognizerStatePossible;
   _targetOpen = interruptedTargetOpen;
   _releaseRevealVelocity = 0;
@@ -1085,8 +1085,8 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
   }
   if (_transitionInterruptionPending) {
     _deferredPanState = UIGestureRecognizerStateEnded;
-    _deferredPanTranslation = [_scrollView.panGestureRecognizer translationInView:self].x * _openingDirection;
-    _deferredPanVelocity = [_scrollView.panGestureRecognizer velocityInView:self].x * _openingDirection;
+    _deferredPanTranslation = [_scrollView.panGestureRecognizer translationInView:self].x;
+    _deferredPanVelocity = [_scrollView.panGestureRecognizer velocityInView:self].x;
     targetContentOffset->x = [self currentScrollOffset];
     targetContentOffset->y = 0;
     return;
@@ -1105,7 +1105,7 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
   if (_transitionInterruptionPending) {
     if (_deferredPanState != UIGestureRecognizerStateEnded) {
       _deferredPanState = UIGestureRecognizerStateCancelled;
-      _deferredPanTranslation = [_scrollView.panGestureRecognizer translationInView:self].x * _openingDirection;
+      _deferredPanTranslation = [_scrollView.panGestureRecognizer translationInView:self].x;
       _deferredPanVelocity = 0;
     }
     return;
@@ -1238,7 +1238,7 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
 - (void)updateDragFromPanGesture
 {
   CGFloat translation = [self dragTranslation];
-  CGFloat dragPosition = _dragStartPosition + translation - _dragStartTranslation;
+  CGFloat dragPosition = _dragStartPosition + (translation - _dragStartTranslation) * _openingDirection;
   if (_activeInteraction.overdrag <= 0) {
     CGFloat boundedPosition = RNSideDrawerClamp(dragPosition, _dragLowerBound, _dragUpperBound);
     if (boundedPosition != dragPosition) {
@@ -1255,15 +1255,16 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
 - (CGFloat)dragTranslation
 {
   return _deferredPanState == UIGestureRecognizerStatePossible
-      ? [_scrollView.panGestureRecognizer translationInView:self].x * _openingDirection
+      ? [_scrollView.panGestureRecognizer translationInView:self].x
       : _deferredPanTranslation;
 }
 
 - (CGFloat)dragVelocity
 {
-  return _deferredPanState == UIGestureRecognizerStateEnded
+  CGFloat velocity = _deferredPanState == UIGestureRecognizerStateEnded
       ? _deferredPanVelocity
-      : [_scrollView.panGestureRecognizer velocityInView:self].x * _openingDirection;
+      : [_scrollView.panGestureRecognizer velocityInView:self].x;
+  return velocity * _openingDirection;
 }
 
 - (CGFloat)currentScrollOffset

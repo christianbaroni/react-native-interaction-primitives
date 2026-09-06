@@ -8,13 +8,62 @@
 #include <cmath>
 #include <cstdio>
 
-// These tests exercise UIKit hit testing, not React touch dispatch.
+// These tests exercise UIKit and native drawer callbacks, not React touch dispatch.
 @implementation RCTTouchHandler
 - (void)cancel {}
 @end
 
 @implementation RCTSurfaceTouchHandler
 @end
+
+static UIViewPropertyAnimator *waitForAnimation(RNSideDrawerView *drawer)
+{
+  UIView *pane = [drawer valueForKey:@"contentPresentationView"];
+  UIViewPropertyAnimator *animator = nil;
+  CFTimeInterval deadline = CACurrentMediaTime() + 2;
+  do {
+    [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.001]];
+    animator = [drawer valueForKey:@"transitionAnimator"];
+  } while ((animator.fractionComplete <= 0.01 || pane.layer.presentationLayer == nil) && CACurrentMediaTime() < deadline);
+  assert(animator != nil && animator.fractionComplete > 0.01 && animator.fractionComplete < 1);
+  assert(pane.layer.presentationLayer != nil);
+  return animator;
+}
+
+static void verifyPendingPanCommand(RNSideDrawerView *drawer, bool frozen, bool commandOpen)
+{
+  [drawer closeAnimated:NO];
+  [drawer openAnimated:YES];
+  [CATransaction flush];
+  waitForAnimation(drawer);
+
+  UIScrollView *scroll = [drawer valueForKey:@"scrollView"];
+  id<UIScrollViewDelegate> delegate = (id<UIScrollViewDelegate>)drawer;
+  // Enter the accepted-pan boundary directly; the animator and display link are real.
+  [delegate scrollViewWillBeginDragging:scroll];
+  assert([[drawer valueForKey:@"transitionInterruptionPending"] boolValue]);
+  UIView *pane = [drawer valueForKey:@"contentPresentationView"];
+  if (frozen) {
+    CFTimeInterval deadline = CACurrentMediaTime() + 2;
+    do {
+      [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.001]];
+    } while (pane.layer.speed != 0 && CACurrentMediaTime() < deadline);
+    assert(pane.layer.speed == 0);
+  }
+
+  if (commandOpen) [drawer openAnimated:YES];
+  else [drawer closeAnimated:YES];
+  assert(![[drawer valueForKey:@"transitionInterruptionPending"] boolValue]);
+  assert([[drawer valueForKey:@"suppressCurrentDragRelease"] boolValue]);
+  assert(pane.layer.speed == 1);
+
+  [scroll.panGestureRecognizer setTranslation:CGPointMake(commandOpen ? -200 : 200, 0) inView:drawer];
+  CGPoint targetOffset = scroll.contentOffset;
+  [delegate scrollViewWillEndDragging:scroll withVelocity:CGPointZero targetContentOffset:&targetOffset];
+  [delegate scrollViewDidEndDragging:scroll willDecelerate:NO];
+  assert([[drawer valueForKey:@"targetOpen"] boolValue] == commandOpen);
+  [drawer closeAnimated:NO];
+}
 
 static void verifyScrim(bool initiallyOpen)
 {
@@ -82,7 +131,7 @@ static void verifyRootHitEligibility(RNSideDrawerView *drawer)
   drawer.alpha = 1;
 }
 
-static void verifyAnimatedHitTesting()
+static void verifyAnimatedInteractions()
 {
   UIWindow *window = [[UIWindow alloc] initWithFrame:CGRectMake(0, 0, 200, 200)];
   UIViewController *controller = [[UIViewController alloc] init];
@@ -105,16 +154,13 @@ static void verifyAnimatedHitTesting()
 
   [drawer openAnimated:YES];
   [CATransaction flush];
-  UIView *pane = [drawer valueForKey:@"contentPresentationView"];
-  UIViewPropertyAnimator *animator = nil;
-  CFTimeInterval deadline = CACurrentMediaTime() + 2;
-  do {
-    [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.02]];
-    animator = [drawer valueForKey:@"transitionAnimator"];
-  } while ((animator.fractionComplete <= 0.01 || pane.layer.presentationLayer == nil) && CACurrentMediaTime() < deadline);
-  assert(animator != nil && animator.fractionComplete > 0.01 && animator.fractionComplete < 1);
-  assert(pane.layer.presentationLayer != nil);
+  waitForAnimation(drawer);
   verifyRootHitEligibility(drawer);
+
+  verifyPendingPanCommand(drawer, false, false);
+  verifyPendingPanCommand(drawer, false, true);
+  verifyPendingPanCommand(drawer, true, false);
+  verifyPendingPanCommand(drawer, true, true);
 
   [drawer closeAnimated:NO];
   [drawer prepareForRemoval];
@@ -127,7 +173,7 @@ int main()
   @autoreleasepool {
     verifyScrim(false);
     verifyScrim(true);
-    verifyAnimatedHitTesting();
+    verifyAnimatedInteractions();
     std::puts("iOS drawer UIKit verification passed");
   }
 }
