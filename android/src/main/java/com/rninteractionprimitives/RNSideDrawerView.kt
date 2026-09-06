@@ -321,6 +321,10 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
     }
 
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        if (gestureEligible && event.actionMasked != MotionEvent.ACTION_DOWN) {
+            velocityTracker?.addMovement(event)
+            if (event.actionMasked == MotionEvent.ACTION_POINTER_UP) handlePointerUp(event)
+        }
         val handled = super.dispatchTouchEvent(event)
         if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) {
             finishTouch(event)
@@ -455,9 +459,7 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
     override fun onTouchEvent(event: MotionEvent): Boolean {
         if (!gestureEnabled || !gestureEligible) return false
         if (event.actionMasked == MotionEvent.ACTION_DOWN) return true
-        ensureVelocityTracker().addMovement(event)
         when (event.actionMasked) {
-            MotionEvent.ACTION_POINTER_UP -> handlePointerUp(event)
             MotionEvent.ACTION_MOVE -> {
                 val pointerIndex = event.findPointerIndex(activePointerId)
                 if (pointerIndex < 0) return false
@@ -472,6 +474,7 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
                         hasDragged = true
                         nestedScrollCoordinator.beginNativeGesture(event)
                         parent?.requestDisallowInterceptTouchEvent(true)
+                        return true
                     }
                 }
                 if (isDragging) {
@@ -799,6 +802,7 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
         settlingSource = SettlingSource.None
         phase = Phase.Dragging
         setHighFrameRateRequested(true)
+        updateDragPosition(currentX)
         publishProgress()
     }
 
@@ -829,8 +833,8 @@ internal class RNSideDrawerView(private val reactContext: ThemedReactContext) : 
         val nextIndex = if (actionIndex == 0) 1 else 0
         activePointerId = event.getPointerId(nextIndex)
         lastPointerX = event.getX(nextIndex)
-        reanchorDrag(lastPointerX)
-        downX = dragStartX
+        if (isDragging) reanchorDrag(lastPointerX)
+        downX = lastPointerX
         downY = event.getY(nextIndex)
         velocityTracker?.clear()
     }
