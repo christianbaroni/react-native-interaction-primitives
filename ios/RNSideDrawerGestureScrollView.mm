@@ -90,8 +90,36 @@ void cancelReactTouches(UIGestureRecognizer *touchHandler)
 
 } // namespace
 
+@interface RNSideDrawerGestureScrollView () <UIGestureRecognizerDelegate>
+@end
+
 @implementation RNSideDrawerGestureScrollView {
   __weak UIView *_touchedView;
+  UIPanGestureRecognizer *_verticalPanGestureRecognizer;
+}
+
+- (instancetype)initWithFrame:(CGRect)frame
+{
+  if ((self = [super initWithFrame:frame])) {
+    // The horizontal scroll pan can remain possible throughout a vertical drag.
+    // Recognize vertical starts so UIKit rejects the drawer until the gesture ends.
+    _verticalPanGestureRecognizer = [[UIPanGestureRecognizer alloc] initWithTarget:nil action:nil];
+    _verticalPanGestureRecognizer.delegate = self;
+    _verticalPanGestureRecognizer.cancelsTouchesInView = NO;
+    _verticalPanGestureRecognizer.delaysTouchesEnded = NO;
+    _verticalPanGestureRecognizer.allowedScrollTypesMask = self.panGestureRecognizer.allowedScrollTypesMask;
+    _verticalPanGestureRecognizer.allowedTouchTypes = self.panGestureRecognizer.allowedTouchTypes;
+    _verticalPanGestureRecognizer.enabled = self.scrollEnabled;
+    [self addGestureRecognizer:_verticalPanGestureRecognizer];
+    [self.panGestureRecognizer requireGestureRecognizerToFail:_verticalPanGestureRecognizer];
+  }
+  return self;
+}
+
+- (void)setScrollEnabled:(BOOL)scrollEnabled
+{
+  [super setScrollEnabled:scrollEnabled];
+  _verticalPanGestureRecognizer.enabled = self.scrollEnabled;
 }
 
 - (BOOL)touchesShouldBegin:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event inContentView:(UIView *)view
@@ -109,6 +137,11 @@ void cancelReactTouches(UIGestureRecognizer *touchHandler)
 
 - (BOOL)gestureRecognizerShouldBegin:(UIGestureRecognizer *)gestureRecognizer
 {
+  if (gestureRecognizer == _verticalPanGestureRecognizer) {
+    const CGPoint velocity = [_verticalPanGestureRecognizer velocityInView:self];
+    return fabs(velocity.y) >= fabs(velocity.x);
+  }
+
   if (gestureRecognizer != self.panGestureRecognizer || self.canBeginDrawerPan == nil) {
     return [super gestureRecognizerShouldBegin:gestureRecognizer];
   }
@@ -117,20 +150,24 @@ void cancelReactTouches(UIGestureRecognizer *touchHandler)
   const BOOL descendantCanScroll = drawerCanMove &&
       touchedDescendantCanScrollHorizontally(_touchedView, self, self.panGestureRecognizer);
   const BOOL accepted = drawerCanMove && !descendantCanScroll;
-  if (accepted) {
-    // A descendant pan cannot prevent React's touch handler; cancel the React touch
-    // when accepting the drawer pan.
-    cancelReactTouches(findReactTouchHandler(_touchedView != nil ? _touchedView : self));
-    cancelTouchedScrollViewPans(_touchedView, self);
-  }
 
-  _touchedView = nil;
+  if (!accepted) _touchedView = nil;
   return accepted;
+}
+
+- (void)cancelCompetingTouches
+{
+  cancelReactTouches(findReactTouchHandler(_touchedView != nil ? _touchedView : self));
+  cancelTouchedScrollViewPans(_touchedView, self);
+  _touchedView = nil;
 }
 
 - (BOOL)gestureRecognizer:(UIGestureRecognizer *)gestureRecognizer
     shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)otherGestureRecognizer
 {
+  if (gestureRecognizer == _verticalPanGestureRecognizer || otherGestureRecognizer == _verticalPanGestureRecognizer) {
+    return gestureRecognizer != self.panGestureRecognizer && otherGestureRecognizer != self.panGestureRecognizer;
+  }
   // A decelerating descendant can otherwise prevent the drawer before its direction gate runs.
   if (gestureRecognizer == self.panGestureRecognizer) {
     return isDescendantScrollViewPan(otherGestureRecognizer, self);

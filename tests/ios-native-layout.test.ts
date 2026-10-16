@@ -57,33 +57,6 @@ describe('iOS native view ownership', () => {
     expect(paperContent + fabricContent + slots + root).not.toContain('setDrawerProgress');
   });
 
-  it('cancels React presses atomically when accepting a drawer pan', () => {
-    const gestureScrollView = source('RNSideDrawerGestureScrollView.mm');
-    const gestureScrollViewHeader = source('RNSideDrawerGestureScrollView.h');
-    const root = source('RNSideDrawerView.mm');
-    const acceptance = between(
-      gestureScrollView,
-      '- (BOOL)gestureRecognizerShouldBegin:(UIGestureRecognizer *)gestureRecognizer\n{',
-      '- (BOOL)gestureRecognizer:(UIGestureRecognizer *)gestureRecognizer'
-    );
-    const accepted = between(acceptance, 'if (accepted) {', '}\n\n  _touchedView = nil;');
-    const beginDragging = between(
-      root,
-      '- (void)scrollViewWillBeginDragging:(UIScrollView *)scrollView\n{',
-      '- (void)scrollViewDidScroll:'
-    );
-
-    expect(accepted).toContain('cancelReactTouches(findReactTouchHandler(_touchedView != nil ? _touchedView : self))');
-    expect(accepted).toContain('cancelTouchedScrollViewPans(_touchedView, self)');
-    expect(accepted.indexOf('cancelReactTouches')).toBeLessThan(accepted.indexOf('cancelTouchedScrollViewPans'));
-    expect(acceptance).toContain('_touchedView = nil;\n  return accepted;');
-    expect(gestureScrollView).not.toContain('_reactTouchHandler');
-    expect(acceptance.match(/cancelReactTouches/g)).toHaveLength(1);
-    expect(beginDragging).not.toContain('cancelReactTouches');
-    expect(gestureScrollViewHeader + root).not.toContain('cancelReactTouchesForActivePan');
-    expect(root).toContain('_scrollView.delaysContentTouches = NO;');
-  });
-
   it('dismisses content editing only after an opening action is accepted', () => {
     const root = source('RNSideDrawerView.mm');
     const command = between(

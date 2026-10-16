@@ -10,11 +10,29 @@
 #include <initializer_list>
 
 // These tests exercise UIKit and native drawer callbacks, not React touch dispatch.
+static NSUInteger reactTouchCancellationCount;
+
 @implementation RCTTouchHandler
-- (void)cancel {}
+- (void)cancel { reactTouchCancellationCount++; }
 @end
 
 @implementation RCTSurfaceTouchHandler
+@end
+
+@interface VerificationPanCancellationObserver : NSObject
+@property (nonatomic, strong) NSMutableArray<NSNumber *> *reactCountsAtCancellation;
+@end
+
+@implementation VerificationPanCancellationObserver
+- (void)observeValueForKeyPath:(NSString *)keyPath
+                     ofObject:(id)object
+                       change:(NSDictionary<NSKeyValueChangeKey, id> *)change
+                      context:(void *)context
+{
+  if (![change[NSKeyValueChangeNewKey] boolValue]) {
+    [self.reactCountsAtCancellation addObject:@(reactTouchCancellationCount)];
+  }
+}
 @end
 
 @interface RNSideDrawerView (Verification)
@@ -458,8 +476,68 @@ static void verifyTransitionCallbacks(bool paper)
   window.hidden = YES;
 }
 
+static void verifyGestureInputConfiguration()
+{
+  RNSideDrawerView *drawer = [[RNSideDrawerView alloc] initWithFrame:CGRectMake(0, 0, 400, 800)];
+  UIScrollView *scroll = [drawer valueForKey:@"scrollView"];
+  assert(!scroll.delaysContentTouches);
+  UIPanGestureRecognizer *verticalPan = nil;
+  for (UIGestureRecognizer *recognizer in scroll.gestureRecognizers) {
+    if ([recognizer isKindOfClass:UIPanGestureRecognizer.class] && recognizer != scroll.panGestureRecognizer) {
+      assert(verticalPan == nil);
+      verticalPan = (UIPanGestureRecognizer *)recognizer;
+    }
+  }
+  assert(verticalPan != nil);
+  assert(verticalPan.allowedScrollTypesMask == scroll.panGestureRecognizer.allowedScrollTypesMask);
+  assert([verticalPan.allowedTouchTypes isEqual:scroll.panGestureRecognizer.allowedTouchTypes]);
+  assert(!verticalPan.cancelsTouchesInView && !verticalPan.delaysTouchesBegan && !verticalPan.delaysTouchesEnded);
+
+  drawer.gestureEnabled = NO;
+  assert(!scroll.panGestureRecognizer.enabled && !verticalPan.enabled);
+  drawer.gestureEnabled = YES;
+  assert(scroll.panGestureRecognizer.enabled && verticalPan.enabled);
+}
+
+static void verifyTouchCancellationAtDragStart()
+{
+  RNSideDrawerView *drawer = [[RNSideDrawerView alloc] initWithFrame:CGRectMake(0, 0, 400, 800)];
+  drawer.drawerWidth = 300;
+  [drawer layoutIfNeeded];
+  [drawer addGestureRecognizer:[[RCTTouchHandler alloc] initWithTarget:nil action:nil]];
+  UIScrollView *scroll = [drawer valueForKey:@"scrollView"];
+  UIScrollView *child = [[UIScrollView alloc] initWithFrame:scroll.bounds];
+  child.contentSize = CGSizeMake(child.bounds.size.width, child.bounds.size.height * 2);
+  UIView *content = [[UIView alloc] initWithFrame:child.bounds];
+  [child addSubview:content];
+  [scroll addSubview:child];
+  [scroll touchesShouldBegin:[NSSet set] withEvent:nil inContentView:content];
+
+  VerificationPanCancellationObserver *observer = [VerificationPanCancellationObserver new];
+  observer.reactCountsAtCancellation = [NSMutableArray new];
+  [child.panGestureRecognizer addObserver:observer forKeyPath:@"enabled" options:NSKeyValueObservingOptionNew context:nullptr];
+  VerificationPanInput *input = controlPan(drawer);
+  input.velocity = 100;
+  input.state = UIGestureRecognizerStatePossible;
+  const NSUInteger before = reactTouchCancellationCount;
+
+  assert([(id<UIGestureRecognizerDelegate>)scroll gestureRecognizerShouldBegin:scroll.panGestureRecognizer]);
+  assert(reactTouchCancellationCount == before);
+  assert(observer.reactCountsAtCancellation.count == 0);
+
+  [(id<UIScrollViewDelegate>)drawer scrollViewWillBeginDragging:scroll];
+  assert(reactTouchCancellationCount == before + 1);
+  assert(([observer.reactCountsAtCancellation isEqualToArray:@[@(before + 1)]]));
+  assert(child.panGestureRecognizer.enabled);
+
+  [child.panGestureRecognizer removeObserver:observer forKeyPath:@"enabled"];
+  [drawer prepareForRemoval];
+}
+
 void verifySideDrawer()
 {
+  verifyGestureInputConfiguration();
+  verifyTouchCancellationAtDragStart();
   verifyScrim(false);
   verifyScrim(true);
   verifyAnimatedInteractions();

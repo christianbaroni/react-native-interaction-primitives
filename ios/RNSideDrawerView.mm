@@ -928,6 +928,7 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
 - (void)scrollViewWillBeginDragging:(UIScrollView *)scrollView
 {
   (void)scrollView;
+  [_scrollView cancelCompetingTouches];
   _suppressCurrentDragRelease = NO;
   BOOL interruptedTargetOpen = _phase == RNSideDrawerPhaseSettling ? _targetOpen : _open;
   if (!interruptedTargetOpen) [_contentView endEditing:YES];
