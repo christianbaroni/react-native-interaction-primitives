@@ -90,6 +90,8 @@ typedef NS_ENUM(NSInteger, RNSideDrawerSettlingSource) {
 - (void)updateContentShadowColor;
 - (UIScreen *)currentScreen;
 
+- (void)updateDragFrameRateRequest;
+- (void)stopDragFrameRateRequest;
 - (void)startPresentationDisplayLink;
 - (void)stopPresentationDisplayLink;
 - (void)refreshPresentationDisplayLink;
@@ -127,6 +129,7 @@ typedef NS_ENUM(NSInteger, RNSideDrawerSettlingSource) {
   CGFloat _dragStartTranslation;
   CGFloat _dragLowerBound;
   CGFloat _dragUpperBound;
+  UIUpdateLink *_dragFrameRateRequest API_AVAILABLE(ios(18.0));
 
   UIViewPropertyAnimator *_transitionAnimator;
   CADisplayLink *_presentationDisplayLink;
@@ -265,6 +268,7 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
 - (void)dealloc
 {
   [_transitionAnimator stopAnimation:YES];
+  [self stopDragFrameRateRequest];
   [self stopPresentationDisplayLink];
 }
 
@@ -353,6 +357,7 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
     _phase = _open ? RNSideDrawerPhaseOpen : RNSideDrawerPhaseClosed;
   }
 
+  [self updateDragFrameRateRequest];
   [self flushPendingProgressSnapshot];
 }
 
@@ -366,6 +371,7 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
     [self refreshPresentationDisplayLink];
   }
 
+  [self updateDragFrameRateRequest];
   [self applyContentCorners];
   [self updateContentBorderColor];
   [self updateContentShadowColor];
@@ -379,6 +385,7 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
     [self updateContentBorderColor];
     [self updateContentShadowColor];
   }
+  [self updateDragFrameRateRequest];
   if (_presentationDisplayLink != nil) [self startPresentationDisplayLink];
 }
 
@@ -724,6 +731,7 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
   _targetOpen = open;
   _settlingSource = source;
   _phase = RNSideDrawerPhaseSettling;
+  [self stopDragFrameRateRequest];
 
   if (cancelActiveDrag) {
     [self cancelActiveDragAtScrollOffset:[self scrollOffsetForProgress:[self revealProgress]]];
@@ -904,6 +912,7 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
   _open = NO;
   _targetOpen = NO;
   _phase = RNSideDrawerPhaseClosed;
+  [self stopDragFrameRateRequest];
   _settlingSource = RNSideDrawerSettlingSourceNone;
   _progressSnapshotPending = NO;
   _suppressCurrentDragRelease = NO;
@@ -945,6 +954,7 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
   _dragUpperBound = MAX(_laidOutDrawerWidth, _reveal);
   _settlingSource = RNSideDrawerSettlingSourceNone;
   _phase = RNSideDrawerPhaseDragging;
+  [self updateDragFrameRateRequest];
 
   [self applyPresentationAtProgress:[self revealProgress]];
   [self publishProgress];
@@ -1043,6 +1053,7 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
   _targetOpen = targetOpen;
   _settlingSource = RNSideDrawerSettlingSourceRelease;
   _phase = RNSideDrawerPhaseSettling;
+  [self stopDragFrameRateRequest];
   [self emitTransitionStart];
   [self publishProgress];
 }
@@ -1055,6 +1066,7 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
   _releaseRevealVelocity = 0;
   _settlingSource = RNSideDrawerSettlingSourceRelease;
   _phase = RNSideDrawerPhaseSettling;
+  [self stopDragFrameRateRequest];
   [self emitTransitionStart];
   [self publishProgress];
 }
@@ -1295,6 +1307,33 @@ static CGFloat RNSideDrawerScreenCornerRadius(UIScreen *screen)
 {
   UIColor *resolvedColor = [_contentShadowColor resolvedColorWithTraitCollection:self.traitCollection];
   _contentPresentationView.layer.shadowColor = (_contentShadowRadius > 0 ? resolvedColor : UIColor.clearColor).CGColor;
+}
+
+#pragma mark - Drag refresh rate
+
+- (void)updateDragFrameRateRequest
+{
+  if (@available(iOS 18.0, *)) {
+    float frameRate = MIN(120, self.window.screen.maximumFramesPerSecond);
+    if (_phase != RNSideDrawerPhaseDragging || frameRate <= 60) {
+      [self stopDragFrameRateRequest];
+      return;
+    }
+
+    if (_dragFrameRateRequest == nil) {
+      _dragFrameRateRequest = [UIUpdateLink updateLinkForView:self];
+    }
+    _dragFrameRateRequest.preferredFrameRateRange = CAFrameRateRangeMake(frameRate, frameRate, frameRate);
+    _dragFrameRateRequest.enabled = YES;
+  }
+}
+
+- (void)stopDragFrameRateRequest
+{
+  if (@available(iOS 18.0, *)) {
+    _dragFrameRateRequest.enabled = NO;
+    _dragFrameRateRequest = nil;
+  }
 }
 
 #pragma mark - Settling observation
